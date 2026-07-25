@@ -36,7 +36,6 @@ WORKDIR /app
 
 # ---- 3. Copy backend ----
 COPY src/ ./src/
-COPY scripts/ ./scripts/
 
 # ---- Runtime ----
 EXPOSE 8000
