@@ -1,0 +1,45 @@
+# Dev / build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Vendored dependencies (we use pip install instead)
+vendor/
+
+# Frontend build artifacts (rebuilt in Docker)
+static-spa/node_modules/
+static-spa/dist/
+
+# Generated output (rebuilt in Docker)
+static/
+
+# Local env / secrets / data
+.env
+.env.local
+data/
+logs/
+*.log
+*.sqlite
+*.sqlite3
+*.db
+
+# Supabase CLI cache
+supabase/.branches/
+supabase/.temp/
+
+# Git + IDE + OS
+.git/
+.github/
+.vscode/
+.idea/
+.DS_Store
+
+# Tests (we only need src at runtime)
+tests/
+
+# Docs (not needed at runtime)
+SPEC.md
