@@ -1,0 +1,51 @@
+# Python / dependencies
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build artifacts
+dist/
+build/
+*.tar.gz
+
+# Vendored dependencies (we ship via PYTHONPATH, not via install)
+vendor/
+
+# Frontend build output
+static-spa/node_modules/
+static-spa/dist/
+static/
+
+# Environment / secrets — NEVER commit
+.env
+.env.*
+!.env.example
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Runtime data
+data/
+logs/
+*.log
+*.sqlite
+*.sqlite3
+*.db
+
+# Supabase CLI cache
+supabase/.branches/
+supabase/.temp/
+
+# Local OAuth/state files
+~/.supabase/access-token
+~/.hermes/shared/nous_auth.json
+
+# Test artifacts
+.coverage
+htmlcov/

@@ -1,0 +1,464 @@
+"""
+Admin + Auth + Stats API.
+
+Auth: HTTP-only cookie `nous_pool_session` containing the Supabase access JWT
+      OR `Authorization: Bearer *** Supabase JWT.
+
+The login flow is:
+  POST /admin/auth/login { email, password } → Supabase REST signInWithPassword
+  → set cookie → return user record.
+
+Admin operations live under /admin/* and require role=admin.
+
+User self-service operations live under /me/* and accept admin OR user role.
+
+Pool account operations:
+  POST /admin/accounts/add      { label }   → start device-code, return URL+code
+  GET  /admin/accounts/poll/{flow_id}       → single poll attempt
+  GET  /admin/accounts/flow/{flow_id}       → status
+  GET  /admin/accounts                      → list pool_accounts
+  POST /admin/accounts/{id}/refresh         → force-refresh single account
+  POST /admin/accounts/refresh-all          → refresh all near-expiry
+
+API key operations (admin):
+  POST /admin/api-keys { user_id, label }   → mint a new key
+  GET  /admin/api-keys?user_id=             → list keys
+  DELETE /admin/api-keys/{id}               → revoke
+
+Stats:
+  GET /admin/stats                          → global aggregates + per-user table
+  GET /me/usage                             → caller's own usage
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+
+from fastapi import APIRouter, Body, Cookie, Depends, HTTPException, Header, Query, Request, Response, status
+from fastapi.responses import JSONResponse
+
+from ..auth.api_key import mint_key
+from ..auth.deps import AuthContext, current_context, require_admin, require_user
+from ..config import load_settings
+from ..db import supabase_admin
+from ..oauth import hermes_oauth
+from ..proxy import dispatcher
+
+log = logging.getLogger(__name__)
+
+router = APIRouter()
+
+
+def _settings():
+    return load_settings()
+
+
+# ============================================================
+# /admin/auth/* — login, logout, me
+# ============================================================
+
+
+@router.post("/admin/auth/login")
+async def login(body: dict, response: Response):
+    """Sign in via Supabase email/password, set session cookie.
+
+    The frontend redirects to Google sign-in via supabase.auth.signInWithOAuth
+    OR signs in via supabase.auth.signInWithPassword. This endpoint is here
+    for the email/password path AND so curl/scripts can log in without
+    touching Supabase JS SDK.
+    """
+    s = _settings()
+    email = body.get("email", "").strip().lower()
+    password = body.get("password", "")
+    if not email or not password:
+        raise HTTPException(400, {"error": "missing_email_or_password"})
+
+    # Call Supabase Auth REST: /auth/v1/token?grant_type=password
+    import httpx
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(
+            f"{s.supabase_url}/auth/v1/token?grant_type=password",
+            headers={
+                "apikey": s.supabase_anon_key,
+                "Content-Type": "application/json",
+            },
+            json={"email": email, "password": password},
+        )
+    if r.status_code >= 400:
+        raise HTTPException(401, {"error": "invalid_credentials", "supabase": r.text[:200]})
+    data = r.json()
+    access_token = data["access_token"]
+
+    # Look up our app_users row
+    auth_user_id = data["user"]["id"]
+    admin = supabase_admin()
+    user_r = (
+        admin.table("app_users")
+        .select("id, auth_user_id, email, role, display_name, disabled_at, last_login_at")
+        .eq("auth_user_id", auth_user_id)
+        .maybe_single()
+        .execute()
+    )
+    user = user_r.data
+    if not user:
+        # Trigger should have created it — but if it didn't, create it now.
+        # (Sign-ups via direct email go through the trigger; sign-ups via admin
+        # signUp() don't always. Be safe.)
+        ins = admin.table("app_users").insert({
+            "auth_user_id": auth_user_id,
+            "email": email,
+            "role": "user",
+            "display_name": data["user"].get("user_metadata", {}).get("display_name"),
+        }).execute()
+        if ins.data:
+            user = ins.data[0]
+
+    if not user:
+        raise HTTPException(500, {"error": "user_record_missing"})
+
+    if user.get("disabled_at"):
+        raise HTTPException(403, {"error": "user_disabled"})
+
+    # Update last_login_at
+    admin.table("app_users").update({
+        "last_login_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", user["id"]).execute()
+
+    # Set HttpOnly cookie
+    response.set_cookie(
+        key=s.cookie_name,
+        value=access_token,
+        max_age=s.cookie_max_age_seconds,
+        httponly=True,
+        secure=s.cookie_secure,
+        samesite="lax",
+        path="/",
+    )
+
+    return {
+        "user": {
+            "id": user["id"],
+            "email": user["email"],
+            "role": user["role"],
+            "display_name": user.get("display_name"),
+        },
+        "expires_at": data.get("expires_at"),
+    }
+
+
+@router.post("/admin/auth/logout")
+async def logout(response: Response, _: AuthContext = Depends(require_user)):
+    s = _settings()
+    response.delete_cookie(s.cookie_name, path="/")
+    return {"ok": True}
+
+
+@router.get("/admin/me")
+async def me(ctx: AuthContext = Depends(require_user)):
+    return {
+        "id": ctx.user_id,
+        "email": ctx.email,
+        "role": ctx.role,
+        "auth_user_id": ctx.auth_user_id,
+    }
+
+
+# ============================================================
+# /admin/users/* — list users (admin can promote roles via Studio)
+# ============================================================
+
+
+@router.get("/admin/users")
+async def list_users(_: AuthContext = Depends(require_admin)):
+    """List all app_users. Admin promotes roles in Supabase Studio."""
+    admin = supabase_admin()
+    r = (
+        admin.table("app_users")
+        .select("id, auth_user_id, email, display_name, role, disabled_at, last_login_at, created_at")
+        .order("created_at", desc=False)
+        .execute()
+    )
+    rows = r.data or []
+    # Attach API key counts
+    keys_r = (
+        admin.table("api_keys")
+        .select("user_id, id, is_active")
+        .execute()
+    )
+    key_counts: dict[str, int] = {}
+    active_keys_by_user: dict[str, list[dict]] = {}
+    for k in (keys_r.data or []):
+        key_counts[k["user_id"]] = key_counts.get(k["user_id"], 0) + (1 if k.get("is_active") else 0)
+        if k.get("is_active"):
+            active_keys_by_user.setdefault(k["user_id"], []).append({"id": k["id"]})
+    out = []
+    for u in rows:
+        out.append({
+            **u,
+            "active_keys_count": key_counts.get(u["id"], 0),
+        })
+    return out
+
+
+# ============================================================
+# /admin/accounts/* — pool account management
+# ============================================================
+
+
+@router.post("/admin/accounts/add")
+async def start_add_account(body: dict, ctx: AuthContext = Depends(require_admin)):
+    """Start a new Hermes device-code flow. Returns URL + code for the admin."""
+    label = body.get("label", "").strip()
+    if not label:
+        raise HTTPException(400, {"error": "missing_label"})
+    flow = await hermes_oauth.start_device_code_flow(label, ctx.user_id)
+    return flow
+
+
+@router.get("/admin/accounts/flow/{flow_id}")
+async def get_flow(flow_id: str, _: AuthContext = Depends(require_admin)):
+    """Status of an in-flight device-code flow (does NOT poll)."""
+    admin = supabase_admin()
+    r = (
+        admin.table("oauth_flows")
+        .select("id, account_label, user_code, verification_uri, status, expires_at, error_message, pool_account_id, created_at")
+        .eq("id", flow_id)
+        .maybe_single()
+        .execute()
+    )
+    if not r.data:
+        raise HTTPException(404, {"error": "flow_not_found"})
+    return r.data
+
+
+@router.post("/admin/accounts/flow/{flow_id}/poll")
+async def poll_flow(flow_id: str, _: AuthContext = Depends(require_admin)):
+    """One poll attempt. Returns the updated flow row."""
+    return await hermes_oauth.poll_device_code_once(flow_id)
+
+
+@router.get("/admin/accounts")
+async def list_pool_accounts(_: AuthContext = Depends(require_admin)):
+    """All pool_accounts with stats — for admin dashboard."""
+    admin = supabase_admin()
+    r = (
+        admin.table("pool_accounts")
+        .select("""
+            id, account_label, health_status, weight,
+            total_requests, total_errors, prompt_tokens, completion_tokens, total_tokens,
+            in_flight, max_concurrent,
+            last_used_at, last_error_at, last_error_msg,
+            token_expires_at, supported_models, created_at, updated_at
+        """)
+        .order("created_at", desc=False)
+        .execute()
+    )
+    return r.data or []
+
+
+@router.post("/admin/accounts/{account_id}/refresh")
+async def refresh_account(account_id: str, _: AuthContext = Depends(require_admin)):
+    result = await hermes_oauth.refresh_pool_account_token(account_id)
+    return result
+
+
+@router.post("/admin/accounts/refresh-all")
+async def refresh_all_accounts(_: AuthContext = Depends(require_admin)):
+    return await hermes_oauth.refresh_all_due()
+
+
+@router.delete("/admin/accounts/{account_id}")
+async def delete_pool_account(account_id: str, _: AuthContext = Depends(require_admin)):
+    admin = supabase_admin()
+    admin.table("pool_accounts").delete().eq("id", account_id).execute()
+    return {"ok": True}
+
+
+# ============================================================
+# /admin/api-keys/* — admin mints keys for users
+# ============================================================
+
+
+@router.post("/admin/api-keys")
+async def mint(body: dict, _: AuthContext = Depends(require_admin)):
+    """Admin mints an API key for a user. Returns the full key ONCE."""
+    user_id = body.get("user_id")
+    label = body.get("label", "default")
+    if not user_id:
+        raise HTTPException(400, {"error": "missing_user_id"})
+
+    full_key, visible_prefix, key_hash = mint_key(label)
+    admin = supabase_admin()
+    r = (
+        admin.table("api_keys")
+        .insert({
+            "user_id": user_id,
+            "key_hash": key_hash,
+            "key_prefix": visible_prefix,
+            "key_label": label,
+        })
+        .execute()
+    )
+    if not r.data:
+        raise HTTPException(500, {"error": "insert_failed"})
+    return {
+        "id": r.data[0]["id"],
+        "sk_live_key": full_key,
+        "prefix": visible_prefix,
+        "label": label,
+        "warning": "Save this key now. It will never be shown again.",
+    }
+
+
+@router.get("/admin/api-keys")
+async def list_keys(user_id: str = Query(...), _: AuthContext = Depends(require_admin)):
+    admin = supabase_admin()
+    r = (
+        admin.table("api_keys")
+        .select("id, user_id, key_prefix, key_label, is_active, last_used_at, total_requests, total_prompt_tokens, total_completion_tokens, created_at, expires_at")
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return r.data or []
+
+
+@router.delete("/admin/api-keys/{key_id}")
+async def revoke_key(key_id: str, _: AuthContext = Depends(require_admin)):
+    admin = supabase_admin()
+    admin.table("api_keys").update({"is_active": False}).eq("id", key_id).execute()
+    return {"ok": True}
+
+
+# ============================================================
+# /admin/stats — aggregate admin stats
+# /me/usage — caller's own usage
+# ============================================================
+
+
+@router.get("/admin/stats")
+async def admin_stats(_: AuthContext = Depends(require_admin)):
+    admin = supabase_admin()
+    # users
+    users_r = admin.table("app_users").select("id, email, role, created_at, last_login_at, disabled_at").execute()
+    users = users_r.data or []
+    # api_keys aggregate
+    keys_r = admin.table("api_keys").select("id, user_id, is_active, total_requests, total_prompt_tokens, total_completion_tokens").execute()
+    keys = keys_r.data or []
+    active_keys = sum(1 for k in keys if k["is_active"])
+    # pool accounts
+    pool_r = admin.table("pool_accounts").select("id, health_status, total_requests, total_errors, total_tokens, in_flight").execute()
+    pool = pool_r.data or []
+    # request logs aggregate (last 30 days for cost estimate)
+    since = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    logs_r = (
+        admin.table("request_logs")
+        .select("user_id, pool_account_id, model, total_tokens, status_code, created_at")
+        .gte("created_at", since)
+        .execute()
+    )
+    logs = logs_r.data or []
+    total_requests = len(logs)
+    total_tokens = sum(l.get("total_tokens") or 0 for l in logs)
+    success_requests = sum(1 for l in logs if 200 <= (l.get("status_code") or 0) < 400)
+
+    return {
+        "users": {
+            "total": len(users),
+            "active": sum(1 for u in users if not u.get("disabled_at")),
+            "admins": sum(1 for u in users if u["role"] == "admin"),
+            "disabled": sum(1 for u in users if u.get("disabled_at")),
+        },
+        "api_keys": {
+            "total": len(keys),
+            "active": active_keys,
+            "total_requests": sum(k.get("total_requests") or 0 for k in keys),
+            "total_prompt_tokens": sum(k.get("total_prompt_tokens") or 0 for k in keys),
+            "total_completion_tokens": sum(k.get("total_completion_tokens") or 0 for k in keys),
+        },
+        "pool": {
+            "total_accounts": len(pool),
+            "healthy_accounts": sum(1 for p in pool if p["health_status"] == "healthy"),
+            "dead_accounts": sum(1 for p in pool if p["health_status"] == "dead"),
+            "total_requests": sum(p.get("total_requests") or 0 for p in pool),
+            "total_errors": sum(p.get("total_errors") or 0 for p in pool),
+            "total_tokens": sum(p.get("total_tokens") or 0 for p in pool),
+            "in_flight": sum(p.get("in_flight") or 0 for p in pool),
+        },
+        "traffic_30d": {
+            "total_requests": total_requests,
+            "successful_requests": success_requests,
+            "error_rate_pct": round((1 - success_requests / total_requests) * 100, 2) if total_requests else 0,
+            "total_tokens": total_tokens,
+        },
+        "per_user": [
+            {
+                "user_id": u["id"],
+                "email": u["email"],
+                "role": u["role"],
+                "active_keys_count": sum(1 for k in keys if k["user_id"] == u["id"] and k["is_active"]),
+                "last_login_at": u.get("last_login_at"),
+                "disabled_at": u.get("disabled_at"),
+            }
+            for u in users
+        ],
+    }
+
+
+@router.get("/me/usage")
+async def my_usage(ctx: AuthContext = Depends(require_user)):
+    """Return caller's own usage summary."""
+    admin = supabase_admin()
+    since_30 = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    since_7 = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+
+    logs_r = (
+        admin.table("request_logs")
+        .select("model, status_code, total_tokens, prompt_tokens, completion_tokens, created_at")
+        .eq("user_id", ctx.user_id)
+        .gte("created_at", since_30)
+        .execute()
+    )
+    logs = logs_r.data or []
+    total_req = len(logs)
+    success = sum(1 for l in logs if 200 <= (l.get("status_code") or 0) < 400)
+    total_tok = sum(l.get("total_tokens") or 0 for l in logs)
+    prompt_tok = sum(l.get("prompt_tokens") or 0 for l in logs)
+    completion_tok = sum(l.get("completion_tokens") or 0 for l in logs)
+
+    # Daily breakdown (last 7 days)
+    daily: dict[str, dict] = {}
+    for i in range(7):
+        d = (datetime.now(timezone.utc) - timedelta(days=i)).date().isoformat()
+        daily[d] = {"date": d, "requests": 0, "tokens": 0}
+    for l in logs:
+        if l.get("created_at") and l["created_at"] >= since_7:
+            d = l["created_at"][:10]
+            if d in daily:
+                daily[d]["requests"] += 1
+                daily[d]["tokens"] += l.get("total_tokens") or 0
+
+    return {
+        "user_id": ctx.user_id,
+        "email": ctx.email,
+        "total_requests_30d": total_req,
+        "successful_requests_30d": success,
+        "error_rate_pct": round((1 - success / total_req) * 100, 2) if total_req else 0,
+        "total_tokens_30d": total_tok,
+        "prompt_tokens_30d": prompt_tok,
+        "completion_tokens_30d": completion_tok,
+        "daily": sorted(daily.values(), key=lambda x: x["date"]),
+    }
+
+
+# ============================================================
+# Health
+# ============================================================
+
+
+@router.get("/healthz")
+async def healthz():
+    return {"ok": True, "ts": datetime.now(timezone.utc).isoformat()}
