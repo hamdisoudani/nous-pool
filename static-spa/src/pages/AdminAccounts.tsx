@@ -12,7 +12,6 @@ import {
   DialogFooter, DialogClose,
 } from "@/components/ui/dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AppShell } from "@/components/Shell";
 import {
   api, PoolAccountOut, InitiateOAuthResp, OAuthPollResp,
 } from "@/auth";
@@ -152,7 +151,7 @@ export function AdminAccounts() {
   }
 
   return (
-    <AppShell>
+    <>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
@@ -391,6 +390,6 @@ export function AdminAccounts() {
           )}
         </DialogContent>
       </Dialog>
-    </AppShell>
+    </>
   );
 }
