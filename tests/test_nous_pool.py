@@ -105,6 +105,15 @@ class FakeQuery:
         self._filters.append(("gte", col, val))
         return self
 
+    def is_(self, col, val):
+        # .is_("disabled_at", "null") is postgrest for col IS NULL.
+        # .is_("col", False) is col = False. We treat "null" specially.
+        if val == "null":
+            self._filters.append(("is_null", col, True))
+        else:
+            self._filters.append(("eq", col, val))
+        return self
+
     def limit(self, n):
         self._limit = n
         return self
@@ -178,6 +187,14 @@ class FakeQuery:
             elif op == "gte":
                 if not (row.get(col) and row.get(col) >= val):
                     return False
+            elif op == "is_null":
+                if val is True:
+                    # Match rows where col IS NULL (i.e. value is None or missing).
+                    if row.get(col) is not None:
+                        return False
+                else:
+                    if row.get(col) is None:
+                        return False
         return True
 
     def _is_single(self):

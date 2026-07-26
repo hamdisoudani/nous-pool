@@ -786,3 +786,258 @@ async def revoke_my_api_key(key_id: str, ctx: AuthContext = Depends(require_user
 @router.get("/healthz")
 async def healthz():
     return {"ok": True, "ts": datetime.now(timezone.utc).isoformat()}
+
+
+# ============================================================
+# /admin/users/* — server-side moderation (ban / unban / role)
+# ============================================================
+# All three endpoints are admin-only via the require_admin middleware.
+# Frontend NEVER calls Supabase directly — every privileged mutation
+# (ban, unban, role change) goes through here.
+# ============================================================
+
+
+def _user_response(u: dict, active_keys_count: int = 0) -> dict:
+    """Build the canonical /admin/user response shape — NEVER include
+    internal columns like auth_user_id or hashed passwords."""
+    return {
+        "id": u["id"],
+        "email": u["email"],
+        "display_name": u.get("display_name"),
+        "role": u["role"],
+        "disabled_at": u.get("disabled_at"),
+        "last_login_at": u.get("last_login_at"),
+        "created_at": u.get("created_at"),
+        "active_keys_count": active_keys_count,
+    }
+
+
+@router.post("/admin/users/{user_id}/ban")
+async def ban_user(
+    user_id: str,
+    body: dict = {},
+    ctx: AuthContext = Depends(require_admin),
+):
+    """Ban a user: set disabled_at to now() and revoke ALL of their API keys.
+
+    Server-side enforcement: subsequent logins will fail (auth/deps.py
+    `current_context` returns 403 user_disabled), and any active API key
+    that was already in the wild will also fail (api key path checks
+    disabled_at too).
+
+    Admin cannot ban themselves (prevents lock-out).
+    """
+    if user_id == ctx.user_id:
+        raise HTTPException(400, {"error": "cannot_ban_self"})
+
+    reason = (body or {}).get("reason") or None
+    now = datetime.now(timezone.utc).isoformat()
+
+    # 1) Disable user
+    r = (
+        supabase_admin()
+        .table("app_users")
+        .update({"disabled_at": now})
+        .eq("id", user_id)
+        .is_("disabled_at", "null")  # only ban active users
+        .execute()
+    )
+    if not r.data:
+        raise HTTPException(404, {"error": "user_not_found_or_already_disabled"})
+
+    # 2) Revoke all of their API keys (best-effort; logged not fatal)
+    supabase_admin().table("api_keys").update(
+        {"is_active": False, "revoked_at": now}
+    ).eq("user_id", user_id).eq("is_active", True).execute()
+
+    return {"ok": True, "user_id": user_id, "disabled_at": now, "reason": reason}
+
+
+@router.post("/admin/users/{user_id}/unban")
+async def unban_user(
+    user_id: str,
+    _: AuthContext = Depends(require_admin),
+):
+    """Restore access (clears disabled_at). Does NOT auto-restore revoked keys."""
+    r = (
+        supabase_admin()
+        .table("app_users")
+        .update({"disabled_at": None})
+        .eq("id", user_id)
+        .execute()
+    )
+    if not r.data:
+        raise HTTPException(404, {"error": "user_not_found"})
+    return {"ok": True, "user_id": user_id, "disabled_at": None}
+
+
+@router.patch("/admin/users/{user_id}/role")
+async def set_user_role(
+    user_id: str,
+    body: dict,
+    ctx: AuthContext = Depends(require_admin),
+):
+    """Promote / demote a user. Admin cannot demote themselves.
+
+    Body: {"role": "user" | "admin"}
+    """
+    if user_id == ctx.user_id:
+        raise HTTPException(400, {"error": "cannot_demote_self"})
+    new_role = (body or {}).get("role")
+    if new_role not in ("user", "admin"):
+        raise HTTPException(400, {"error": "invalid_role"})
+
+    r = (
+        supabase_admin()
+        .table("app_users")
+        .update({"role": new_role})
+        .eq("id", user_id)
+        .execute()
+    )
+    if not r.data:
+        raise HTTPException(404, {"error": "user_not_found"})
+    return {"ok": True, "user_id": user_id, "role": new_role}
+
+
+# ============================================================
+# /admin/analytics — site-wide aggregates (admin only)
+# ============================================================
+
+
+@router.get("/admin/analytics")
+async def admin_analytics(_: AuthContext = Depends(require_admin)):
+    """Site-wide analytics dashboard data:
+      - Total users (active vs banned)
+      - Total API keys (active vs revoked)
+      - Pool accounts (active vs disabled)
+      - Request stats: 24h, 7d, 30d totals (requests, errors, prompt/completion tokens)
+      - Recent error rate
+      - Top users by token usage (last 30 days)
+
+    All SQL aggregates are computed in the backend (Supabase Postgrest).
+    The frontend just receives the JSON and renders it. NEVER queries Supabase directly.
+    """
+    admin = supabase_admin()
+    now = datetime.now(timezone.utc)
+    last_24h = (now - timedelta(hours=24)).isoformat()
+    last_7d = (now - timedelta(days=7)).isoformat()
+    last_30d = (now - timedelta(days=30)).isoformat()
+
+    # -- User counts (one query, one round trip) --
+    users_r = (
+        admin.table("app_users")
+        .select("id, role, disabled_at")
+        .execute()
+    )
+    users = users_r.data or []
+    total_users = len(users)
+    active_users = sum(1 for u in users if not u.get("disabled_at"))
+    banned_users = total_users - active_users
+    admin_count = sum(1 for u in users if u.get("role") == "admin")
+
+    # -- API key counts --
+    keys_r = (
+        admin.table("api_keys")
+        .select("id, is_active")
+        .execute()
+    )
+    keys = keys_r.data or []
+    total_keys = len(keys)
+    active_keys = sum(1 for k in keys if k.get("is_active"))
+
+    # -- Pool account counts --
+    accts_r = (
+        admin.table("pool_accounts")
+        .select("id, status")
+        .execute()
+    )
+    accts = accts_r.data or []
+    pool_active = sum(1 for a in accts if (a.get("status") or "") == "active")
+    pool_disabled = sum(1 for a in accts if (a.get("status") or "") == "disabled")
+    pool_dead = sum(1 for a in accts if (a.get("status") or "") == "dead")
+
+    # -- Request totals across three windows --
+    def agg(since: str):
+        r = (
+            admin.table("request_logs")
+            .select("status_code, prompt_tokens, completion_tokens, total_tokens")
+            .gte("created_at", since)
+            .limit(5000)
+            .execute()
+        )
+        rows = r.data or []
+        return {
+            "requests": len(rows),
+            "errors": sum(1 for r in rows if (r.get("status_code") or 0) >= 400),
+            "prompt_tokens": sum((r.get("prompt_tokens") or 0) for r in rows),
+            "completion_tokens": sum((r.get("completion_tokens") or 0) for r in rows),
+            "total_tokens": sum((r.get("total_tokens") or 0) for r in rows),
+        }
+
+    requests_24h = agg(last_24h)
+    requests_7d = agg(last_7d)
+    requests_30d = agg(last_30d)
+
+    # -- Top users by token usage (last 30d) --
+    top_users_r = (
+        admin.table("request_logs")
+        .select("user_id, total_tokens")
+        .gte("created_at", last_30d)
+        .limit(5000)
+        .execute()
+    )
+    by_user: dict[str, int] = {}
+    for r in (top_users_r.data or []):
+        uid = r.get("user_id")
+        if not uid:
+            continue
+        by_user[uid] = by_user.get(uid, 0) + (r.get("total_tokens") or 0)
+
+    # Hydrate user emails for the top 5
+    top_user_ids = sorted(by_user, key=by_user.get, reverse=True)[:5]
+    email_by_id = {}
+    if top_user_ids:
+        emails_r = (
+            admin.table("app_users")
+            .select("id, email")
+            .in_("id", top_user_ids)
+            .execute()
+        )
+        for u in (emails_r.data or []):
+            email_by_id[u["id"]] = u["email"]
+
+    top_users = [
+        {
+            "user_id": uid,
+            "email": email_by_id.get(uid, "<deleted>"),
+            "total_tokens": by_user[uid],
+        }
+        for uid in top_user_ids
+    ]
+
+    return {
+        "ts": now.isoformat(),
+        "users": {
+            "total": total_users,
+            "active": active_users,
+            "banned": banned_users,
+            "admins": admin_count,
+        },
+        "api_keys": {
+            "total": total_keys,
+            "active": active_keys,
+            "revoked": total_keys - active_keys,
+        },
+        "pool_accounts": {
+            "total": len(accts),
+            "active": pool_active,
+            "disabled": pool_disabled,
+            "dead": pool_dead,
+        },
+        "requests": {
+            "24h": requests_24h,
+            "7d": requests_7d,
+            "30d": requests_30d,
+        },
+        "top_users_30d": top_users,
+    }

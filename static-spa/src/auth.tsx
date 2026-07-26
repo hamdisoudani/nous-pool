@@ -74,28 +74,92 @@ export type ApiKeyOut = {
   id: string;
   user_id: string;
   key_prefix: string;
-  sk_live_key?: string; // only returned on creation
+  sk_live_key?: string;  // only returned on creation
   label: string;
+  is_active: boolean;
   created_at: string;
   last_used_at: string | null;
   total_requests: number;
 };
 
 export type AdminStats = {
-  users: { total: number; admins: number };
+  users: {
+    total: number;
+    active: number;
+    admins: number;
+    disabled: number;
+  };
+  api_keys: {
+    total: number;
+    active: number;
+    total_requests: number;
+    total_prompt_tokens: number;
+    total_completion_tokens: number;
+  };
   pool: {
     total_accounts: number;
     healthy_accounts: number;
     dead_accounts: number;
-    in_flight_requests: number;
     total_requests: number;
     total_errors: number;
     total_tokens: number;
-    prompt_tokens: number;
-    completion_tokens: number;
-    models_supported: string[];
+    in_flight: number;
   };
-  api_keys: { total: number; active: number };
+  traffic_30d: {
+    total_requests: number;
+    successful_requests: number;
+    error_rate_pct: number;
+    total_tokens: number;
+  };
+};
+
+export type AdminAnalytics = {
+  ts: string;
+  users: {
+    total: number;
+    active: number;
+    banned: number;
+    admins: number;
+  };
+  api_keys: {
+    total: number;
+    active: number;
+    revoked: number;
+  };
+  pool_accounts: {
+    total: number;
+    active: number;
+    disabled: number;
+    dead: number;
+  };
+  requests: {
+    "24h": {
+      requests: number;
+      errors: number;
+      prompt_tokens: number;
+      completion_tokens: number;
+      total_tokens: number;
+    };
+    "7d": {
+      requests: number;
+      errors: number;
+      prompt_tokens: number;
+      completion_tokens: number;
+      total_tokens: number;
+    };
+    "30d": {
+      requests: number;
+      errors: number;
+      prompt_tokens: number;
+      completion_tokens: number;
+      total_tokens: number;
+    };
+  };
+  top_users_30d: Array<{
+    user_id: string;
+    email: string;
+    total_tokens: number;
+  }>;
 };
 
 export type MyUsage = {
@@ -152,10 +216,21 @@ export const api = {
     apiFetch<{ ok: true }>(`/admin/accounts/${id}`, { method: "DELETE" }),
   listUsers: () => apiFetch<{ users: AppUser[] }>("/admin/users"),
   setUserRole: (userId: string, role: Role) =>
-    apiFetch<{ user: AppUser }>(`/admin/users/${userId}/role`, {
-      method: "PATCH",
-      body: JSON.stringify({ role }),
-    }),
+    apiFetch<{ ok: true; user_id: string; role: Role }>(
+      `/admin/users/${userId}/role`,
+      { method: "PATCH", body: JSON.stringify({ role }) },
+    ),
+  banUser: (userId: string, reason?: string) =>
+    apiFetch<{ ok: true; user_id: string; disabled_at: string; reason?: string }>(
+      `/admin/users/${userId}/ban`,
+      { method: "POST", body: JSON.stringify({ reason: reason ?? null }) },
+    ),
+  unbanUser: (userId: string) =>
+    apiFetch<{ ok: true; user_id: string; disabled_at: null }>(
+      `/admin/users/${userId}/unban`,
+      { method: "POST" },
+    ),
+  getAnalytics: () => apiFetch<AdminAnalytics>("/admin/analytics"),
   listMyApiKeys: () =>
     apiFetch<{ keys: ApiKeyOut[] }>("/admin/me/api-keys"),
   createMyApiKey: (label: string) =>
