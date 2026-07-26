@@ -46,5 +46,5 @@ ENV NOUS_POOL_HOST=0.0.0.0 \
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD curl -sf http://127.0.0.1:8000/healthz || exit 1
 
-# Bind to Railway's PORT (default 8000) and log every request
-CMD ["sh", "-c", "echo '=== Booting nous-pool ===' && exec python -m uvicorn nous_pool.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --log-level info 2>&1"]
+# Bind to Railway's PORT env var (Railway default for containers is often 8080)
+CMD ["sh", "-c", "echo \"=== PORT env: ${PORT:-unset} ===\" && echo '=== Booting nous-pool ===' && exec python -m uvicorn nous_pool.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --log-level info 2>&1"]
