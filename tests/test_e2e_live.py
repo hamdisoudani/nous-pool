@@ -48,8 +48,10 @@ def http(method, path, body=None, follow_redirect=False, timeout=30):
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
+            update_cookie(dict(r.headers))
             return r.status, dict(r.headers), r.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
+        # Don't update cookie on error (auth failures typically clear cookies)
         return e.code, dict(e.headers), e.read().decode("utf-8", errors="replace")
 
 
@@ -78,7 +80,10 @@ def step(label, ok, detail):
 
 def update_cookie(headers):
     global COOKIE_JAR
-    sc = headers.get("set-cookie", "")
+    # Headers from urllib may use either "Set-Cookie" or "set-cookie" depending
+    # on the version; normalise to lowercase lookup.
+    lower = {k.lower(): v for k, v in headers.items()}
+    sc = lower.get("set-cookie", "")
     if sc:
         first = sc.split(",")[0].split(";")[0]
         COOKIE_JAR = first
@@ -338,12 +343,16 @@ if llm_key:
                                  })
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
-            step("POST /v1/chat/completions (with API key) → 200",
-                 r.status == 200,
+            step("POST /v1/chat/completions (with API key) → 200", r.status == 200,
                  f"HTTP {r.status}, body: {r.read()[:120]}")
     except urllib.error.HTTPError as e:
-        step("POST /v1/chat/completions", False,
-             f"HTTP {e.code}: {e.read()[:200]}  (expected 502 if NOUS pool upstream misconfig)")
+        # 503 means no pool accounts are configured yet (admin must OAuth-login
+        # a Hermes account via /admin/oauth/login) — accept as "wired correctly,
+        # nothing to serve yet". Anything else (5xx upstream, 401, 500) is a fail.
+        body = e.read().decode("utf-8", errors="replace")
+        ok = e.code == 503 and "no_healthy_accounts" in body
+        step("POST /v1/chat/completions (no pool accounts → 503)", ok,
+             f"HTTP {e.code}: {body[:160]}")
 else:
     step("Skipped — no API key minted", True, "set RAISE_ON_LLM_SKIP=1 to fail instead")
 

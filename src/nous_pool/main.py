@@ -30,17 +30,11 @@ logger = logging.getLogger("nous_pool")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("[LIFESPAN] nous-pool starting up", flush=True)
+    logger.info("nous-pool starting up")
     s = load_settings()
-    def _mask(v):
-        return f"{v[:6]}...{v[-6:]} (len {len(v)})" if len(v) > 16 else ("(empty)" if not v else v)
-    print(
-        f"[LIFESPAN] supabase_url={s.supabase_url} anon={_mask(s.supabase_anon_key)} "
-        f"service={_mask(s.supabase_service_role_key)} jwt_secret={_mask(s.supabase_jwt_secret)}",
-        flush=True,
-    )
+    logger.info(f"supabase url: {s.supabase_url}")
     yield
-    print("[LIFESPAN] nous-pool shutting down", flush=True)
+    logger.info("nous-pool shutting down")
 
 
 def create_app() -> FastAPI:
