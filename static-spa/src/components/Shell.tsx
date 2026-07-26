@@ -22,8 +22,8 @@ export function Shell({ children }: { children: ReactNode }) {
     : [{ label: "My Dashboard", to: "/dashboard", icon: Layers }];
 
   return (
-    <div className="min-h-screen flex bg-background">
-      <aside className="w-64 shrink-0 border-r bg-card flex flex-col">
+    <div className="h-[100dvh] flex bg-background overflow-hidden">
+      <aside className="w-64 shrink-0 border-r bg-card flex flex-col overflow-y-auto">
         <div className="px-6 py-5">
           <Link to={isAdmin ? "/admin" : "/dashboard"} className="flex items-center gap-2">
             <div className="h-8 w-8 rounded-md bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white font-bold">

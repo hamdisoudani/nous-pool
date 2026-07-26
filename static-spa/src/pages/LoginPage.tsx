@@ -68,7 +68,7 @@ export function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted/40 p-6">
+    <div className="min-h-[100dvh] grid place-items-center bg-gradient-to-br from-background via-background to-muted/40 p-6">
       <Card className="w-full max-w-md animate-fade-in">
         <CardHeader className="space-y-3 text-center pb-2">
           <div className="mx-auto h-12 w-12 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white font-bold text-xl">
@@ -121,7 +121,7 @@ export function LoginPage() {
                 id="email"
                 type="email"
                 autoComplete="email"
-                placeholder="[email protected]"
+                placeholder="you@yourcompany.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={submitting}

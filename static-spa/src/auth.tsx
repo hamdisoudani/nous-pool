@@ -260,7 +260,7 @@ export function RequireAuth({ children, role }: { children: ReactNode; role?: Ro
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-muted-foreground">
+      <div className="min-h-[100dvh] flex items-center justify-center text-muted-foreground">
         Loading…
       </div>
     );
