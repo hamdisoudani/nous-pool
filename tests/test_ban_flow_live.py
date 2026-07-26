@@ -99,7 +99,8 @@ def main():
     print("\n[4] Banned victim tries to log back in")
     code, h, b = req("POST", "/admin/auth/login",
                      {"email": victim_email, "password": PWD})
-    expect("status (banned login)", code, 401)
+    # Banned login returns 403 with detail.error == "user_disabled"
+    expect("status (banned login)", code, 403)
     body = json.loads(b)
     expect("error code", body.get("detail", {}).get("error"), "user_disabled")
 

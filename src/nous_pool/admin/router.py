@@ -948,13 +948,13 @@ async def admin_analytics(_: AuthContext = Depends(require_admin)):
     # -- Pool account counts --
     accts_r = (
         admin.table("pool_accounts")
-        .select("id, status")
+        .select("id, health_status")
         .execute()
     )
     accts = accts_r.data or []
-    pool_active = sum(1 for a in accts if (a.get("status") or "") == "active")
-    pool_disabled = sum(1 for a in accts if (a.get("status") or "") == "disabled")
-    pool_dead = sum(1 for a in accts if (a.get("status") or "") == "dead")
+    pool_active = sum(1 for a in accts if (a.get("health_status") or "") == "healthy")
+    pool_disabled = sum(1 for a in accts if (a.get("health_status") or "") == "disabled")
+    pool_dead = sum(1 for a in accts if (a.get("health_status") or "") == "dead")
 
     # -- Request totals across three windows --
     def agg(since: str):
