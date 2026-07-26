@@ -156,13 +156,179 @@ async def logout(response: Response, _: AuthContext = Depends(require_user)):
     return {"ok": True}
 
 
+@router.post("/admin/auth/signup")
+async def signup(body: dict, response: Response):
+    """Self-service sign-up via Supabase email/password.
+
+    The trigger `handle_new_auth_user` on auth.users creates the `app_users`
+    row at default `role='user'`. The trigger `bootstrap_first_admin` on
+    `app_users` promotes the very first signup to admin so the operator
+    doesn't have to manually intervene before the system is usable.
+
+    No admin token required to call this — anyone can sign up.
+    """
+    s = _settings()
+    email = body.get("email", "").strip().lower()
+    password = body.get("password", "")
+    display_name = (body.get("display_name") or email.split("@")[0]).strip()
+
+    if not email or not password:
+        raise HTTPException(400, {"error": "missing_email_or_password"})
+    if "@" not in email or "." not in email:
+        raise HTTPException(400, {"error": "invalid_email"})
+    if len(password) < 8:
+        raise HTTPException(400, {"error": "password_too_short"})
+    if len(password) > 72:
+        # bcrypt limit (Supabase Auth uses bcrypt internally)
+        raise HTTPException(400, {"error": "password_too_long"})
+
+    import httpx
+    async with httpx.AsyncClient(timeout=20) as client:
+        # 1) Create the auth.users row. email_confirm: True skips the
+        #    confirmation email flow (typical for self-hosted, since we
+        #    don't have SMTP set up). If you DO want confirmation emails
+        #    later, set NOUS_POOL_REQUIRE_EMAIL_CONFIRM=false or similar
+        #    env and switch to False here.
+        r = await client.post(
+            f"{s.supabase_url}/auth/v1/admin/users",
+            headers={
+                "apikey": s.supabase_service_role_key,
+                "Authorization": f"Bearer {s.supabase_service_role_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "email": email,
+                "password": password,
+                "email_confirm": True,
+                "user_metadata": {"display_name": display_name},
+            },
+        )
+    if r.status_code >= 400:
+        body_err = r.text[:300]
+        # Friendly messages for common cases
+        if "already been registered" in body_err or "already exists" in body_err.lower():
+            raise HTTPException(409, {"error": "email_already_registered"})
+        if "password" in body_err.lower() and ("weak" in body_err.lower() or "short" in body_err.lower()):
+            raise HTTPException(400, {"error": "weak_password", "supabase": body_err})
+        raise HTTPException(400, {"error": "signup_failed", "supabase": body_err})
+    auth_user_id = r.json().get("id")
+    if not auth_user_id:
+        raise HTTPException(500, {"error": "signup_no_user_id"})
+
+    # 2) Sign in immediately to mint a session JWT.
+    import httpx as _httpx
+    async with _httpx.AsyncClient(timeout=15) as client:
+        r2 = await client.post(
+            f"{s.supabase_url}/auth/v1/token?grant_type=password",
+            headers={
+                "apikey": s.supabase_anon_key,
+                "Content-Type": "application/json",
+            },
+            json={"email": email, "password": password},
+        )
+    if r2.status_code >= 400:
+        # Auth row exists but sign-in failed (e.g. email_confirm needed in
+        # the future). Tell the user to log in manually.
+        raise HTTPException(201, {"status": "created_signin_required"})
+
+    access_token = r2.json()["access_token"]
+
+    # 3) Look up our app_users row — created by handle_new_auth_user trigger;
+    #    role may have been bumped to admin by bootstrap_first_admin if this
+    #    is the very first signup.
+    admin = supabase_admin()
+    # Tiny delay because trigger is async (NOT actually; triggers are sync),
+    # but be defensive — retry once if not found.
+    user = None
+    for _ in range(3):
+        user_r = (
+            admin.table("app_users")
+            .select("id, auth_user_id, email, role, display_name, disabled_at, last_login_at")
+            .eq("auth_user_id", auth_user_id)
+            .maybe_single()
+            .execute()
+        )
+        user = user_r.data
+        if user:
+            break
+        import asyncio
+        await asyncio.sleep(0.2)
+
+    if not user:
+        # Trigger didn't fire for some reason — create the row manually.
+        ins = admin.table("app_users").insert({
+            "auth_user_id": auth_user_id,
+            "email": email,
+            "display_name": display_name,
+            "role": "user",
+        }).execute()
+        user = ins.data[0] if ins.data else None
+
+    if not user:
+        raise HTTPException(500, {"error": "app_user_record_missing"})
+
+    admin.table("app_users").update({
+        "last_login_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", user["id"]).execute()
+
+    response.set_cookie(
+        key=s.cookie_name,
+        value=access_token,
+        max_age=s.cookie_max_age_seconds,
+        httponly=True,
+        secure=s.cookie_secure,
+        samesite="lax",
+        path="/",
+    )
+
+    return {
+        "user": {
+            "id": user["id"],
+            "email": user["email"],
+            "role": user["role"],
+            "display_name": user.get("display_name"),
+            "avatar_url": None,
+            "disabled_at": user.get("disabled_at"),
+            "last_login_at": user.get("last_login_at"),
+            "created_at": user.get("created_at") or datetime.now(timezone.utc).isoformat(),
+        },
+        "expires_at": r2.json().get("expires_at"),
+    }
+
+
 @router.get("/admin/me")
 async def me(ctx: AuthContext = Depends(require_user)):
+    admin = supabase_admin()
+    r = (
+        admin.table("app_users")
+        .select("id, auth_user_id, email, display_name, role, disabled_at, last_login_at, created_at")
+        .eq("id", ctx.user_id)
+        .maybe_single()
+        .execute()
+    )
+    row = r.data
+    if not row:
+        # Safe fallback if the trigger hasn't materialised yet
+        return {
+            "id": ctx.user_id,
+            "auth_user_id": ctx.auth_user_id,
+            "email": ctx.email,
+            "display_name": None,
+            "role": ctx.role,
+            "disabled_at": None,
+            "last_login_at": None,
+            "created_at": None,
+        }
     return {
-        "id": ctx.user_id,
-        "email": ctx.email,
-        "role": ctx.role,
-        "auth_user_id": ctx.auth_user_id,
+        "id": row["id"],
+        "auth_user_id": row["auth_user_id"],
+        "email": row["email"],
+        "display_name": row.get("display_name"),
+        "avatar_url": None,
+        "role": row["role"],
+        "disabled_at": row.get("disabled_at"),
+        "last_login_at": row.get("last_login_at"),
+        "created_at": row.get("created_at"),
     }
 
 
@@ -177,30 +343,24 @@ async def list_users(_: AuthContext = Depends(require_admin)):
     admin = supabase_admin()
     r = (
         admin.table("app_users")
-        .select("id, auth_user_id, email, display_name, role, disabled_at, last_login_at, created_at")
+        .select("id, auth_user_id, email, display_name, role, disabled_at, last_login_at, created_at, updated_at")
         .order("created_at", desc=False)
         .execute()
     )
     rows = r.data or []
-    # Attach API key counts
-    keys_r = (
-        admin.table("api_keys")
-        .select("user_id, id, is_active")
-        .execute()
-    )
-    key_counts: dict[str, int] = {}
-    active_keys_by_user: dict[str, list[dict]] = {}
-    for k in (keys_r.data or []):
-        key_counts[k["user_id"]] = key_counts.get(k["user_id"], 0) + (1 if k.get("is_active") else 0)
-        if k.get("is_active"):
-            active_keys_by_user.setdefault(k["user_id"], []).append({"id": k["id"]})
     out = []
     for u in rows:
         out.append({
-            **u,
-            "active_keys_count": key_counts.get(u["id"], 0),
+            "id": u["id"],
+            "email": u["email"],
+            "display_name": u.get("display_name"),
+            "role": u["role"],
+            "disabled_at": u.get("disabled_at"),
+            "last_login_at": u.get("last_login_at"),
+            "created_at": u.get("created_at"),
+            "active_keys_count": 0,  # TODO: secondary query for counts
         })
-    return out
+    return {"users": out}
 
 
 # ============================================================
@@ -452,6 +612,137 @@ async def my_usage(ctx: AuthContext = Depends(require_user)):
         "completion_tokens_30d": completion_tok,
         "daily": sorted(daily.values(), key=lambda x: x["date"]),
     }
+
+
+# ============================================================
+# /admin/me/* — caller-scoped operations
+# ============================================================
+
+
+@router.get("/admin/me/usage")
+async def me_usage(ctx: AuthContext = Depends(require_user)):
+    """Return caller's own usage summary over the past 30 days."""
+    admin = supabase_admin()
+    since_30 = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+
+    logs_r = (
+        admin.table("request_logs")
+        .select("model, status_code, total_tokens, prompt_tokens, completion_tokens, created_at")
+        .eq("user_id", ctx.user_id)
+        .gte("created_at", since_30)
+        .order("created_at", desc=True)
+        .limit(50)
+        .execute()
+    )
+    logs = logs_r.data or []
+    total_req = len(logs)
+    error_count = sum(1 for l in logs if (l.get("status_code") or 0) >= 400)
+    total_tok = sum(l.get("total_tokens") or 0 for l in logs)
+    prompt_tok = sum(l.get("prompt_tokens") or 0 for l in logs)
+    completion_tok = sum(l.get("completion_tokens") or 0 for l in logs)
+
+    return {
+        "period": {"days": 30},
+        "totals": {
+            "requests": total_req,
+            "errors": error_count,
+            "prompt_tokens": prompt_tok,
+            "completion_tokens": completion_tok,
+            "total_tokens": total_tok,
+        },
+        "by_day": [],  # bundled inline; optional future expansion
+        "recent": [
+            {
+                "id": l.get("id") or f"{l['created_at']}-{l['model']}",
+                "model": l.get("model") or "unknown",
+                "created_at": l.get("created_at"),
+                "status_code": l.get("status_code") or 0,
+                "tokens": l.get("total_tokens") or 0,
+            }
+            for l in logs[:20]
+        ],
+    }
+
+
+@router.get("/admin/me/api-keys")
+async def list_my_api_keys(ctx: AuthContext = Depends(require_user)):
+    """List API keys for the current user."""
+    admin = supabase_admin()
+    r = (
+        admin.table("api_keys")
+        .select("id, user_id, key_prefix, key_label, is_active, last_used_at, total_requests, created_at, expires_at")
+        .eq("user_id", ctx.user_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    rows = r.data or []
+    return {
+        "keys": [
+            {
+                "id": k["id"],
+                "user_id": k["user_id"],
+                "key_prefix": k["key_prefix"],
+                "label": k.get("key_label") or "",
+                "is_active": k.get("is_active"),
+                "last_used_at": k.get("last_used_at"),
+                "total_requests": k.get("total_requests") or 0,
+                "created_at": k["created_at"],
+            }
+            for k in rows
+        ]
+    }
+
+
+@router.post("/admin/me/api-keys")
+async def create_my_api_key(body: dict, ctx: AuthContext = Depends(require_user)):
+    """Mint a new API key for the current user. Returns full key ONCE."""
+    from ..auth.api_key import mint_key
+    label = (body.get("label") or "default").strip()
+    if not label:
+        raise HTTPException(400, {"error": "missing_label"})
+
+    full_key, visible_prefix, key_hash = mint_key(label)
+    admin = supabase_admin()
+    r = (
+        admin.table("api_keys")
+        .insert({
+            "user_id": ctx.user_id,
+            "key_hash": key_hash,
+            "key_prefix": visible_prefix,
+            "key_label": label,
+            "is_active": True,
+        })
+        .execute()
+    )
+    if not r.data:
+        raise HTTPException(500, {"error": "insert_failed"})
+    return {
+        "id": r.data[0]["id"],
+        "user_id": ctx.user_id,
+        "key_prefix": visible_prefix,
+        "label": label,
+        "sk_live_key": full_key,
+        "is_active": True,
+        "total_requests": 0,
+        "created_at": r.data[0]["created_at"],
+        "last_used_at": None,
+    }
+
+
+@router.delete("/admin/me/api-keys/{key_id}")
+async def revoke_my_api_key(key_id: str, ctx: AuthContext = Depends(require_user)):
+    """Revoke (deactivate) one of the caller's API keys. Idempotent."""
+    admin = supabase_admin()
+    r = (
+        admin.table("api_keys")
+        .update({"is_active": False})
+        .eq("id", key_id)
+        .eq("user_id", ctx.user_id)  # only your own keys
+        .execute()
+    )
+    if not r.data:
+        raise HTTPException(404, {"error": "key_not_found"})
+    return {"ok": True}
 
 
 # ============================================================

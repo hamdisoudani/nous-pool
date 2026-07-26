@@ -1,0 +1,9 @@
+node_modules/
+../static/
+.vite/
+dist/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+vite.config.js.map
+vite.config.d.ts.map

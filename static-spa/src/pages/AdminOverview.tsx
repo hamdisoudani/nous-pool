@@ -1,134 +1,178 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../auth';
-import { endpoints, AdminStats } from '../api';
-import { formatNum, relativeTime, HealthDot } from '../components/Charts';
-import { Shell } from './UserDashboard';
+import { useEffect, useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Shell } from "@/components/Shell";
+import { api, AdminStats } from "@/auth";
+import {
+  Activity, Users, Database, KeyRound, AlertTriangle,
+  TrendingUp, Cpu
+} from "lucide-react";
+import { formatNumber } from "@/lib/utils";
 
-export default function AdminOverview() {
-  const { me, logout } = useAuth();
-  const nav = useNavigate();
-  const [stats, setStats] = useState<AdminStats | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function load() {
-    try {
-      const s = await endpoints.adminStats();
-      setStats(s);
-      setErr(null);
-    } catch (e: any) {
-      setErr(e.message);
-    }
-  }
-  useEffect(() => { load(); }, []);
-
-  if (err) {
-    return (
-      <Shell me={me!} onLogout={async () => { await logout(); nav('/login'); }}>
-        <div className="text-bad">{err}</div>
-      </Shell>
-    );
-  }
-  if (!stats) {
-    return (
-      <Shell me={me!} onLogout={async () => { await logout(); nav('/login'); }}>
-        <div className="text-muted">loading…</div>
-      </Shell>
-    );
-  }
-
-  const u = stats.users;
-  const a = stats.api_keys;
-  const p = stats.pool;
-  const t = stats.traffic_30d;
-
+function StatCard({
+  icon, label, value, sub, variant = "default",
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  sub?: React.ReactNode;
+  variant?: "default" | "success" | "destructive";
+}) {
   return (
-    <Shell me={me!} onLogout={async () => { await logout(); nav('/login'); }}>
-      <h1 className="text-xl font-semibold mb-1">Overview</h1>
-      <p className="text-muted text-sm mb-6">Whole-pool aggregate (last 30 days)</p>
-
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
-        <Metric label="Users" value={formatNum(u.total)} sub={`${u.admins} admin · ${u.disabled} disabled`} />
-        <Metric label="Pool accounts" value={formatNum(p.total_accounts)} sub={`${p.healthy_accounts} healthy · ${p.dead_accounts} dead`} />
-        <Metric label="Active API keys" value={formatNum(a.active)} sub={`${formatNum(a.total)} total`} />
-        <Metric label="Total requests (30d)" value={formatNum(t.total_requests)} sub={`${t.error_rate_pct.toFixed(2)}% errors`} />
-        <Metric label="Total tokens (30d)" value={formatNum(t.total_tokens)} sub={`↑ ${formatNum(a.total_prompt_tokens)} prompt · ↓ ${formatNum(a.total_completion_tokens)}`} />
-      </div>
-
-      <div className="card mb-6">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-medium text-muted">All users</h2>
-          <a href="/admin/users" className="text-xs text-accent hover:underline">manage users →</a>
+    <Card>
+      <CardContent className="pt-6">
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-sm text-muted-foreground">{label}</p>
+            <div className="text-3xl font-bold tabular-nums mt-2">{value}</div>
+            {sub && <div className="text-xs text-muted-foreground mt-1">{sub}</div>}
+          </div>
+          <div className={`h-10 w-10 rounded-md flex items-center justify-center ${
+            variant === "destructive" ? "bg-red-500/10 text-red-500" :
+            variant === "success" ? "bg-emerald-500/10 text-emerald-500" :
+            "bg-primary/10 text-primary"
+          }`}>
+            {icon}
+          </div>
         </div>
-        {stats.per_user.length === 0 ? (
-          <div className="text-muted text-sm">no users yet — sign up via the login page</div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="text-muted text-xs uppercase">
-              <tr>
-                <th className="text-left py-2">email</th>
-                <th className="text-left py-2">role</th>
-                <th className="text-left py-2">last seen</th>
-                <th className="text-right py-2">active keys</th>
-              </tr>
-            </thead>
-            <tbody>
-              {stats.per_user.map(row => (
-                <tr key={row.user_id} className="border-t border-line">
-                  <td className="py-2 font-mono text-xs">
-                    <span className="mr-2">{row.role === 'admin' ? '👑' : '👤'}</span>
-                    {row.email}
-                    {row.disabled_at && <span className="ml-2 tag tag-bad">disabled</span>}
-                  </td>
-                  <td className="text-xs text-muted">{row.role}</td>
-                  <td className="text-muted text-xs">{relativeTime(row.last_login_at)}</td>
-                  <td className="text-right">{row.active_keys_count}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      <div className="card">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-medium text-muted">Pool accounts</h2>
-          <a href="/admin/accounts" className="text-xs text-accent hover:underline">manage accounts →</a>
-        </div>
-        {p.total_accounts === 0 ? (
-          <div className="text-muted text-sm">no accounts in the pool yet — add one in the Accounts tab</div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="text-muted text-xs uppercase">
-              <tr>
-                <th className="text-left py-2">account</th>
-                <th className="text-left py-2">health</th>
-                <th className="text-left py-2">last used</th>
-                <th className="text-right py-2">requests</th>
-                <th className="text-right py-2">errors</th>
-                <th className="text-right py-2">tokens</th>
-              </tr>
-            </thead>
-            <tbody>
-              {p.total_accounts && Array.from({length: p.total_accounts}).map((_, i) => (
-                <tr key={i} className="border-t border-line text-muted text-xs">
-                  <td colSpan={6} className="py-2">See Accounts page for details</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </Shell>
+      </CardContent>
+    </Card>
   );
 }
 
-function Metric({ label, value, sub }: { label: string; value: string; sub?: string }) {
+export function AdminOverview() {
+  const [stats, setStats] = useState<AdminStats | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.stats()
+      .then(setStats)
+      .catch((e) => setError(e?.body?.error || e?.message));
+  }, []);
+
+  if (error) {
+    return (
+      <Shell>
+        <Card>
+          <CardContent className="pt-6 text-center text-destructive">{error}</CardContent>
+        </Card>
+      </Shell>
+    );
+  }
+
+  if (!stats) {
+    return (
+      <Shell>
+        <div className="text-muted-foreground">Loading…</div>
+      </Shell>
+    );
+  }
+
+  const errorRate =
+    stats.pool.total_requests === 0
+      ? 0
+      : (stats.pool.total_errors / stats.pool.total_requests) * 100;
+
   return (
-    <div className="card">
-      <div className="metric-sub mb-1">{label}</div>
-      <div className="metric">{value}</div>
-      {sub && <div className="metric-sub mt-1">{sub}</div>}
-    </div>
+    <Shell>
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Overview</h1>
+          <p className="text-muted-foreground mt-1">
+            Live stats across all pool accounts and API keys.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard
+            icon={<Activity className="h-5 w-5" />}
+            label="Total Requests"
+            value={formatNumber(stats.pool.total_requests)}
+            sub={`${stats.pool.in_flight_requests} in-flight`}
+          />
+          <StatCard
+            icon={<TrendingUp className="h-5 w-5" />}
+            label="Total Tokens"
+            value={formatNumber(stats.pool.total_tokens)}
+            sub={`${formatNumber(stats.pool.prompt_tokens)} prompt / ${formatNumber(stats.pool.completion_tokens)} completion`}
+          />
+          <StatCard
+            icon={<Database className="h-5 w-5" />}
+            label="Pool Accounts"
+            value={`${stats.pool.healthy_accounts} / ${stats.pool.total_accounts}`}
+            sub={stats.pool.dead_accounts > 0 ? (
+              <span className="text-destructive">{stats.pool.dead_accounts} dead</span>
+            ) : (
+              <span className="text-emerald-500">all healthy</span>
+            )}
+          />
+          <StatCard
+            icon={<Users className="h-5 w-5" />}
+            label="Users"
+            value={String(stats.users.total)}
+            sub={`${stats.users.admins} admin${stats.users.admins === 1 ? "" : "s"}`}
+          />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Error Rate</CardTitle>
+              <CardDescription>Across the lifetime of the pool</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="text-4xl font-bold tabular-nums">
+                {errorRate.toFixed(2)}
+                <span className="text-base text-muted-foreground ml-1">%</span>
+              </div>
+              <div className="text-xs text-muted-foreground mt-2">
+                {stats.pool.total_errors.toLocaleString()} errors out of{" "}
+                {stats.pool.total_requests.toLocaleString()} requests
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Cpu className="h-4 w-4" />
+                Models Served
+              </CardTitle>
+              <CardDescription>Models available through the pool</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {stats.pool.models_supported.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Add a pool account to discover supported models.
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {stats.pool.models_supported.map((m) => (
+                    <Badge key={m} variant="secondary">{m}</Badge>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {stats.pool.dead_accounts > 0 && (
+          <Card className="border-destructive/30 bg-destructive/5">
+            <CardContent className="pt-6 flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+              <div>
+                <div className="font-semibold">
+                  {stats.pool.dead_accounts} pool account{stats.pool.dead_accounts === 1 ? "" : "s"} need attention
+                </div>
+                <p className="text-sm text-muted-foreground mt-1">
+                  These accounts are returning 400/401 on token refresh and need re-authorization.
+                  Visit <span className="font-medium">Pool Accounts</span> to re-add them.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    </Shell>
   );
 }

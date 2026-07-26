@@ -1,292 +1,396 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../auth';
-import { endpoints, InitiateOAuthResp, OAuthFlowOut, PoolAccountOut } from '../api';
-import { Shell } from './UserDashboard';
-import { relativeTime, HealthDot } from '../components/Charts';
+import { useEffect, useState } from "react";
+import {
+  Card, CardHeader, CardTitle, CardContent, CardDescription,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+  DialogFooter, DialogClose,
+} from "@/components/ui/dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Shell } from "@/components/Shell";
+import {
+  api, PoolAccountOut, InitiateOAuthResp, OAuthPollResp,
+} from "@/auth";
+import {
+  Plus, RefreshCw, Trash2, Loader2, Copy, Check, AlertCircle,
+} from "lucide-react";
+import { formatNumber } from "@/lib/utils";
 
-export default function AdminAccounts() {
-  const { me, logout } = useAuth();
-  const nav = useNavigate();
+export function AdminAccounts() {
   const [accounts, setAccounts] = useState<PoolAccountOut[]>([]);
-  const [err, setErr] = useState<string | null>(null);
-  const [showAdd, setShowAdd] = useState(false);
-  const [label, setLabel] = useState('');
-  const [initiating, setInitiating] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [addOpen, setAddOpen] = useState(false);
+  const [label, setLabel] = useState("");
+  const [adding, setAdding] = useState(false);
   const [flow, setFlow] = useState<InitiateOAuthResp | null>(null);
-  const [flowStatus, setFlowStatus] = useState<OAuthFlowOut | null>(null);
+  const [pollErr, setPollErr] = useState<string | null>(null);
+  const [polling, setPolling] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [refreshId, setRefreshId] = useState<string | null>(null);
 
-  async function load() {
+  async function refresh() {
+    setLoading(true);
     try {
-      const a = await endpoints.listAccounts();
-      setAccounts(a);
-      setErr(null);
+      const r = await api.listAccounts();
+      setAccounts(r.accounts);
+      setError(null);
     } catch (e: any) {
-      setErr(e.message);
-    }
-  }
-  useEffect(() => { load(); }, []);
-
-  async function onStartFlow() {
-    setInitiating(true);
-    setErr(null);
-    try {
-      const r = await endpoints.startAddAccount(label.trim());
-      setFlow(r);
-      setFlowStatus(null);
-      poll(r.flow_id);
-    } catch (e: any) {
-      setErr(e.message);
+      setError(e?.body?.error || e?.message);
     } finally {
-      setInitiating(false);
+      setLoading(false);
     }
   }
 
-  async function poll(flowId: string) {
-    let attempts = 0;
-    const maxAttempts = 120; // 120 * 5s = 600s = 10min
-    while (attempts < maxAttempts) {
-      attempts++;
-      try {
-        // Single poll attempt
-        const r = await endpoints.pollOAuthFlow(flowId);
-        setFlowStatus(r);
-        if (r.status !== 'pending') {
-          await load();
-          return;
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  // Poll loop for active OAuth flow
+  useEffect(() => {
+    if (!flow || !polling) return;
+
+    const expiresAt = Date.now() + flow.expires_in * 1000;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled || Date.now() >= expiresAt) {
+        if (!cancelled) {
+          setPollErr("Device code expired. Please try again.");
+          setPolling(false);
         }
-      } catch (e: any) {
-        setFlowStatus({
-          id: flowId, account_label: '', user_code: '', verification_uri: '',
-          status: 'error', error_message: e.message,
-          expires_at: '', pool_account_id: null, created_at: '',
-        });
         return;
       }
-      await new Promise(r => setTimeout(r, 5000));
-    }
-    setFlowStatus(prev => prev ? { ...prev, status: 'expired' } : null);
-  }
+      try {
+        const r: OAuthPollResp = await api.pollFlow(flow.flow_id);
+        if (cancelled) return;
+        if (r.status === "success") {
+          setPolling(false);
+          setAddOpen(false);
+          setFlow(null);
+          setLabel("");
+          await refresh();
+          return;
+        }
+        if (r.status === "expired") {
+          setPollErr("Device code expired. Please try again.");
+          setPolling(false);
+          return;
+        }
+        if (r.status === "error") {
+          setPollErr(r.detail || "Polling failed.");
+          setPolling(false);
+          return;
+        }
+        // pending — schedule next tick
+        setTimeout(tick, Math.max(1, r.interval) * 1000);
+      } catch (e: any) {
+        if (!cancelled) {
+          setPollErr(e?.body?.error || e?.message);
+          setPolling(false);
+        }
+      }
+    };
 
-  function onCopy(text: string) {
-    navigator.clipboard.writeText(text);
-  }
+    const timer = setTimeout(tick, Math.max(1, flow.interval) * 1000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [flow, polling]);
 
-  async function onRefreshAll() {
+  async function onStartAdd(e: React.FormEvent) {
+    e.preventDefault();
+    setPollErr(null);
+    setAdding(true);
     try {
-      const r = await endpoints.refreshAllAccounts();
-      setErr(
-        `Refreshed ${r.refreshed} accounts, ${r.dead} dead, ${r.skipped} skipped (considered ${r.considered})`
-      );
-      await load();
+      const r = await api.initiateAddAccount(label.trim());
+      setFlow(r);
+      setPolling(true);
     } catch (e: any) {
-      setErr(e.message);
+      setPollErr(e?.body?.error || e?.message);
+    } finally {
+      setAdding(false);
     }
   }
 
-  async function onRefreshOne(id: string) {
+  async function onRefresh(id: string) {
+    setRefreshId(id);
     try {
-      await endpoints.refreshAccount(id);
-      await load();
+      const r = await api.refreshAccount(id);
+      if (r.status === "still_dead") {
+        setError("Account is dead and needs re-authorization.");
+      }
+      await refresh();
     } catch (e: any) {
-      setErr(e.message);
+      setError(e?.body?.error || e?.message);
+    } finally {
+      setRefreshId(null);
     }
   }
 
-  async function onDeleteOne(id: string, label: string) {
-    if (!confirm(`Delete pool account "${label}"?`)) return;
+  async function onDelete(id: string) {
+    if (!confirm("Remove this pool account? It will stop receiving requests.")) return;
     try {
-      await endpoints.deleteAccount(id);
-      await load();
+      await api.deleteAccount(id);
+      await refresh();
     } catch (e: any) {
-      setErr(e.message);
+      setError(e?.body?.error || e?.message);
     }
+  }
+
+  function copyCode() {
+    if (!flow) return;
+    navigator.clipboard.writeText(flow.user_code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
   }
 
   return (
-    <Shell me={me!} onLogout={async () => { await logout(); nav('/login'); }}>
-      <div className="flex items-center justify-between mb-1">
-        <h1 className="text-xl font-semibold">Pool accounts</h1>
-        <div className="flex gap-2">
-          <button className="btn btn-secondary" onClick={onRefreshAll}>Refresh all</button>
-          <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add account</button>
-        </div>
-      </div>
-      <p className="text-muted text-sm mb-6">
-        NOUS / Hermes accounts that back the round-robin proxy. Add via device-code flow.
-      </p>
-
-      {err && (
-        <div className="mb-4 text-sm text-bad bg-bad/10 border border-bad/20 rounded p-2">{err}</div>
-      )}
-
-      {showAdd && !flow && (
-        <div className="card mb-6 space-y-4">
-          <h2 className="text-sm font-medium">Add a pool account</h2>
+    <Shell>
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
           <div>
-            <label className="label">Account label</label>
-            <input
-              className="input w-full"
-              value={label}
-              onChange={e => setLabel(e.target.value)}
-              placeholder="e.g. mrhamdi291@gmail.com"
-              autoFocus
-            />
-            <p className="text-xs text-muted mt-1">
-              This becomes the account's display name in the dashboard.
+            <h1 className="text-3xl font-bold tracking-tight">Pool Accounts</h1>
+            <p className="text-muted-foreground mt-1">
+              OAuth-authorized Nous/Hermes accounts used to handle requests.
             </p>
           </div>
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => { setShowAdd(false); setLabel(''); }}
-              disabled={initiating}
-            >
-              Cancel
-            </button>
-            <button
-              className="btn btn-primary"
-              onClick={onStartFlow}
-              disabled={!label.trim() || initiating}
-            >
-              {initiating ? 'Starting…' : 'Start device-code flow'}
-            </button>
-          </div>
+          <Button onClick={() => setAddOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add Account
+          </Button>
         </div>
-      )}
 
-      {flow && (
-        <div className="card mb-6 border-accent2/40 bg-accent2/5">
-          <h2 className="text-sm font-medium mb-3">Authorize this device-code</h2>
-          <div className="text-sm space-y-3">
-            <div>
-              <div className="text-muted text-xs mb-1">1. Open this URL in your browser:</div>
-              <div className="font-mono text-xs break-all bg-bg border border-line rounded p-2 flex items-center gap-2">
+        {error && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">
+              {accounts.length} account{accounts.length === 1 ? "" : "s"}
+            </CardTitle>
+            <CardDescription>
+              Round-robin dispatch picks the least-busy healthy account.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-0">
+            {loading ? (
+              <div className="p-8 flex items-center justify-center text-muted-foreground">
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Loading…
+              </div>
+            ) : accounts.length === 0 ? (
+              <div className="p-12 text-center">
+                <p className="text-muted-foreground">
+                  No pool accounts yet. Add one to start serving requests.
+                </p>
+                <Button onClick={() => setAddOpen(true)} variant="outline" className="mt-4">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add your first account
+                </Button>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Label</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Models</TableHead>
+                    <TableHead className="text-right">Requests</TableHead>
+                    <TableHead className="text-right">Errors</TableHead>
+                    <TableHead className="text-right">Tokens</TableHead>
+                    <TableHead></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {accounts.map((a) => (
+                    <TableRow key={a.id}>
+                      <TableCell className="font-medium">{a.account_label}</TableCell>
+                      <TableCell>
+                        <Badge variant={a.status === "healthy" ? "success" : "destructive"}>
+                          {a.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          {a.supported_models.slice(0, 3).map((m) => (
+                            <Badge key={m} variant="outline" className="text-xs">
+                              {m}
+                            </Badge>
+                          ))}
+                          {a.supported_models.length > 3 && (
+                            <Badge variant="outline" className="text-xs">
+                              +{a.supported_models.length - 3}
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{formatNumber(a.total_requests)}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {a.total_errors > 0 ? (
+                          <span className="text-destructive">{formatNumber(a.total_errors)}</span>
+                        ) : (
+                          formatNumber(a.total_errors)
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{formatNumber(a.total_tokens)}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => onRefresh(a.id)}
+                            disabled={refreshId === a.id}
+                            title="Refresh token"
+                          >
+                            {refreshId === a.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <RefreshCw className="h-4 w-4" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => onDelete(a.id)}
+                            title="Remove account"
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Add-account dialog */}
+      <Dialog
+        open={addOpen}
+        onOpenChange={(v) => {
+          if (!v) {
+            setFlow(null);
+            setPolling(false);
+            setPollErr(null);
+            setLabel("");
+          }
+          setAddOpen(v);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add pool account</DialogTitle>
+            <DialogDescription>
+              Authorize a new account via OAuth device flow.
+            </DialogDescription>
+          </DialogHeader>
+
+          {!flow ? (
+            <form onSubmit={onStartAdd} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="label">Label</Label>
+                <Input
+                  id="label"
+                  placeholder="e.g. team-main, daemon-1"
+                  value={label}
+                  onChange={(e) => setLabel(e.target.value)}
+                  disabled={adding}
+                  required
+                />
+                <p className="text-xs text-muted-foreground">
+                  A human-readable name so you can identify this account later.
+                </p>
+              </div>
+
+              {pollErr && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>{pollErr}</AlertDescription>
+                </Alert>
+              )}
+
+              <DialogFooter>
+                <DialogClose asChild>
+                  <Button variant="outline" type="button">Cancel</Button>
+                </DialogClose>
+                <Button type="submit" disabled={adding}>
+                  {adding ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Starting flow…
+                    </>
+                  ) : (
+                    "Start device flow"
+                  )}
+                </Button>
+              </DialogFooter>
+            </form>
+          ) : (
+            <div className="space-y-4">
+              <p className="text-sm">
+                Open{" "}
                 <a
                   href={flow.verification_uri}
                   target="_blank"
-                  rel="noreferrer"
-                  className="text-accent2 underline"
+                  rel="noopener noreferrer"
+                  className="font-medium text-primary underline"
                 >
                   {flow.verification_uri}
-                </a>
-                <button
-                  className="text-xs text-muted hover:text-ink"
-                  onClick={() => onCopy(flow.verification_uri)}
-                >
-                  copy
-                </button>
-              </div>
-            </div>
-            <div>
-              <div className="text-muted text-xs mb-1">2. Enter this code when prompted:</div>
-              <div className="font-mono text-lg bg-bg border border-line rounded px-3 py-2 inline-flex items-center gap-2">
-                {flow.user_code}
-                <button
-                  className="text-xs text-muted hover:text-ink"
-                  onClick={() => onCopy(flow.user_code)}
-                >
-                  copy
-                </button>
-              </div>
-            </div>
-            <div className="text-xs text-muted">
-              Code expires in {Math.floor(flow.expires_in / 60)}m.{' '}
-              We'll detect the success automatically and add the account to the pool.
-            </div>
-            {flowStatus && (
-              <div className="mt-2 p-2 border rounded bg-bg border-line">
-                <div>
-                  Status:{' '}
-                  <span
-                    className={
-                      flowStatus.status === 'success' ? 'text-ok font-mono'
-                      : flowStatus.status === 'pending' ? 'text-muted font-mono'
-                      : 'text-bad font-mono'
-                    }
-                  >
-                    {flowStatus.status}
-                  </span>
-                </div>
-                {flowStatus.error_message && (
-                  <div className="text-bad text-xs mt-1">{flowStatus.error_message}</div>
-                )}
-                {flowStatus.status === 'success' && flowStatus.pool_account_id && (
-                  <div className="text-ok text-xs mt-1">
-                    ✓ Account added (id={flowStatus.pool_account_id})
-                  </div>
-                )}
-              </div>
-            )}
-            <button
-              className="btn btn-secondary text-sm"
-              onClick={() => { setFlow(null); setFlowStatus(null); setShowAdd(false); setLabel(''); }}
-            >
-              Dismiss
-            </button>
-          </div>
-        </div>
-      )}
+                </a>{" "}
+                and enter the code below within{" "}
+                <span className="font-mono">{Math.floor(flow.expires_in / 60)}m {flow.expires_in % 60}s</span>:
+              </p>
 
-      <div className="card">
-        {accounts.length === 0 ? (
-          <div className="text-muted text-sm">
-            no accounts yet — click "+ Add account" to start the device-code flow
-          </div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="text-muted text-xs uppercase">
-              <tr>
-                <th className="text-left py-2">label</th>
-                <th className="text-left py-2">health</th>
-                <th className="text-left py-2">token expires</th>
-                <th className="text-left py-2">last used</th>
-                <th className="text-right py-2">requests</th>
-                <th className="text-right py-2">errors</th>
-                <th className="text-right py-2">tokens</th>
-                <th className="text-right py-2">in flight</th>
-                <th className="text-right py-2">actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {accounts.map(a => (
-                <tr key={a.id} className="border-t border-line align-top">
-                  <td className="py-2 font-mono text-xs">{a.account_label}</td>
-                  <td><HealthDot status={a.health_status} /></td>
-                  <td className="text-muted text-xs">
-                    {relativeTime(a.token_expires_at)}
-                    {a.last_error_msg && (
-                      <div className="text-bad text-[10px] mt-1 truncate max-w-xs" title={a.last_error_msg}>
-                        {a.last_error_msg}
-                      </div>
-                    )}
-                  </td>
-                  <td className="text-muted text-xs">{relativeTime(a.last_used_at)}</td>
-                  <td className="text-right">{a.total_requests}</td>
-                  <td className="text-right">{a.total_errors}</td>
-                  <td className="text-right">{a.total_tokens}</td>
-                  <td className="text-right">{a.in_flight} / {a.max_concurrent}</td>
-                  <td className="text-right whitespace-nowrap">
-                    <button
-                      className="text-accent2 hover:underline text-xs mr-3"
-                      onClick={() => onRefreshOne(a.id)}
-                    >
-                      refresh
-                    </button>
-                    <button
-                      className="text-bad hover:underline text-xs"
-                      onClick={() => onDeleteOne(a.id, a.account_label)}
-                    >
-                      delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 text-center text-2xl font-mono tracking-widest p-4 bg-muted rounded-md select-all">
+                  {flow.user_code}
+                </code>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={copyCode}
+                  title="Copy code"
+                >
+                  {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                </Button>
+              </div>
+
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Waiting for you to authorize on the provider website…
+              </div>
+
+              {pollErr && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>{pollErr}</AlertDescription>
+                </Alert>
+              )}
+
+              <DialogFooter>
+                <Button variant="outline" onClick={() => { setFlow(null); setPolling(false); setPollErr(null); }}>
+                  Cancel
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </Shell>
   );
 }
