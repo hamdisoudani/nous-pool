@@ -105,6 +105,10 @@ class FakeQuery:
         self._filters.append(("gte", col, val))
         return self
 
+    def limit(self, n):
+        self._limit = n
+        return self
+
     def order(self, col, desc=False):
         return self
 
@@ -120,11 +124,16 @@ class FakeQuery:
         if self._op == "insert":
             data = self._data
             if isinstance(data, dict):
-                data = {**data, "id": data.get("id") or str(uuid.uuid4())}
+                if not data.get("id"):
+                    data["id"] = str(uuid.uuid4())
+                # Auto-fill created_at if caller didn't supply it (mirrors
+                # the Postgres default CURRENT_TIMESTAMP).
+                if "created_at" not in data:
+                    data["created_at"] = datetime.now(timezone.utc).isoformat()
                 rows.append(data)
                 result = [data]
             else:
-                result = []
+                result = []  # bulk insert not implemented in fake
         elif self._op == "update":
             updated = []
             for r in rows:
@@ -145,6 +154,8 @@ class FakeQuery:
         else:
             # select
             result = [r for r in rows if self._match(r)]
+            if self._op is None and getattr(self, "_limit", None):
+                result = result[: self._limit]
 
         resp = MagicMock()
         if self._is_single():

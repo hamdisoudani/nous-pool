@@ -8,11 +8,12 @@ export type AppUser = {
   id: string;
   email: string;
   role: Role;
-  displayName: string | null;
-  avatarUrl: string | null;
-  disabledAt: string | null;
-  createdAt: string;
-  lastLoginAt: string | null;
+  display_name: string | null;
+  avatar_url: string | null;
+  disabled_at: string | null;
+  last_login_at: string | null;
+  created_at: string | null;
+  active_api_keys_count?: number;
 };
 
 class ApiError extends Error {

@@ -267,6 +267,22 @@ async def signup(body: dict, response: Response):
     if not user:
         raise HTTPException(500, {"error": "app_user_record_missing"})
 
+    # First-user bootstrap: if there are zero admins in app_users, promote
+    # this new user to admin. Mirrors bootstrap_first_admin in SQL but
+    # runs in code so we don't depend on the DB trigger being installed.
+    admin_count_r = (
+        admin.table("app_users")
+        .select("id")
+        .eq("role", "admin")
+        .limit(1)
+        .execute()
+    )
+    if not (admin_count_r.data or []):
+        # No admins exist yet — make this newcomer the operator admin.
+        upd = admin.table("app_users").update({"role": "admin"}).eq("id", user["id"]).execute()
+        if upd.data:
+            user["role"] = "admin"
+
     admin.table("app_users").update({
         "last_login_at": datetime.now(timezone.utc).isoformat(),
     }).eq("id", user["id"]).execute()
@@ -311,17 +327,17 @@ async def me(ctx: AuthContext = Depends(require_user)):
         # Safe fallback if the trigger hasn't materialised yet
         return {
             "id": ctx.user_id,
-            "auth_user_id": ctx.auth_user_id,
             "email": ctx.email,
             "display_name": None,
+            "avatar_url": None,
             "role": ctx.role,
             "disabled_at": None,
             "last_login_at": None,
             "created_at": None,
+            "active_api_keys_count": 0,
         }
     return {
         "id": row["id"],
-        "auth_user_id": row["auth_user_id"],
         "email": row["email"],
         "display_name": row.get("display_name"),
         "avatar_url": None,
@@ -329,7 +345,24 @@ async def me(ctx: AuthContext = Depends(require_user)):
         "disabled_at": row.get("disabled_at"),
         "last_login_at": row.get("last_login_at"),
         "created_at": row.get("created_at"),
+        # Active-API-key count (separate small query; cheap on indexed user_id).
+        "active_api_keys_count": _count_active_keys(ctx.user_id),
     }
+
+
+def _count_active_keys(user_id: str) -> int:
+    """Return count of active (non-revoked) API keys for a user."""
+    try:
+        r = (
+            supabase_admin()
+            .table("api_keys")
+            .select("id, is_active")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        return sum(1 for k in (r.data or []) if k.get("is_active"))
+    except Exception:
+        return 0
 
 
 # ============================================================

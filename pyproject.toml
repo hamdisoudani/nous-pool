@@ -31,3 +31,6 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# test_e2e_live.py requires a running server (default http://127.0.0.1:7901).
+# Run it explicitly with: NOUS_POOL_BASE_URL=... python3 tests/test_e2e_live.py
+addopts = "--ignore=tests/test_e2e_live.py"
