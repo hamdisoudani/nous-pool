@@ -94,7 +94,7 @@ export function AnalyticsPage() {
         </Card>
         <Card>
           <CardContent className="p-6">
-            <div className="text-sm font-medium text-muted-foreground">API keys</div>
+            <div className="text-sm font-medium text-muted-foreground">Active API keys</div>
             <div className="text-3xl font-bold tabular-nums mt-1.5">
               {formatNumber(a.api_keys.active)}
             </div>
@@ -120,7 +120,9 @@ export function AnalyticsPage() {
           <CardContent className="p-6">
             <div className="text-sm font-medium text-muted-foreground">Error rate (30d)</div>
             <div className="text-3xl font-bold tabular-nums mt-1.5">
-              {err30}<span className="text-base text-muted-foreground">%</span>
+              {a.requests["30d"].requests > 0
+                ? <>{err30}<span className="text-base text-muted-foreground">%</span></>
+                : <span className="text-muted-foreground">—</span>}
             </div>
             <div className="text-xs text-muted-foreground mt-1">
               {formatNumber(a.requests["30d"].errors)} of{" "}

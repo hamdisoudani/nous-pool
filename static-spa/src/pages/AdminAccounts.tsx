@@ -12,7 +12,7 @@ import {
   DialogFooter, DialogClose,
 } from "@/components/ui/dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Shell } from "@/components/Shell";
+import { AppShell } from "@/components/Shell";
 import {
   api, PoolAccountOut, InitiateOAuthResp, OAuthPollResp,
 } from "@/auth";
@@ -152,7 +152,7 @@ export function AdminAccounts() {
   }
 
   return (
-    <Shell>
+    <AppShell>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
@@ -217,20 +217,20 @@ export function AdminAccounts() {
                     <TableRow key={a.id}>
                       <TableCell className="font-medium">{a.account_label}</TableCell>
                       <TableCell>
-                        <Badge variant={a.status === "healthy" ? "success" : "destructive"}>
-                          {a.status}
+                        <Badge variant={a.health_status === "healthy" ? "success" : "destructive"}>
+                          {a.health_status ?? "unknown"}
                         </Badge>
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1">
-                          {a.supported_models.slice(0, 3).map((m) => (
+                          {(a.supported_models ?? []).slice(0, 3).map((m) => (
                             <Badge key={m} variant="outline" className="text-xs">
                               {m}
                             </Badge>
                           ))}
-                          {a.supported_models.length > 3 && (
+                          {(a.supported_models?.length ?? 0) > 3 && (
                             <Badge variant="outline" className="text-xs">
-                              +{a.supported_models.length - 3}
+                              +{(a.supported_models?.length ?? 0) - 3}
                             </Badge>
                           )}
                         </div>
@@ -391,6 +391,6 @@ export function AdminAccounts() {
           )}
         </DialogContent>
       </Dialog>
-    </Shell>
+    </AppShell>
   );
 }

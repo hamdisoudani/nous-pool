@@ -59,15 +59,22 @@ export type OAuthPollResp =
 export type PoolAccountOut = {
   id: string;
   account_label: string;
-  status: string;
-  supported_models: string[];
+  health_status: string | null;
+  weight: number | null;
+  supported_models: string[] | null;
   total_requests: number;
   total_errors: number;
+  prompt_tokens: number;
+  completion_tokens: number;
   total_tokens: number;
+  in_flight: number;
+  max_concurrent: number | null;
   last_used_at: string | null;
   last_error_at: string | null;
   last_error_msg: string | null;
+  token_expires_at: string | null;
   created_at: string;
+  updated_at: string | null;
 };
 
 export type ApiKeyOut = {
@@ -80,37 +87,6 @@ export type ApiKeyOut = {
   created_at: string;
   last_used_at: string | null;
   total_requests: number;
-};
-
-export type AdminStats = {
-  users: {
-    total: number;
-    active: number;
-    admins: number;
-    disabled: number;
-  };
-  api_keys: {
-    total: number;
-    active: number;
-    total_requests: number;
-    total_prompt_tokens: number;
-    total_completion_tokens: number;
-  };
-  pool: {
-    total_accounts: number;
-    healthy_accounts: number;
-    dead_accounts: number;
-    total_requests: number;
-    total_errors: number;
-    total_tokens: number;
-    in_flight: number;
-  };
-  traffic_30d: {
-    total_requests: number;
-    successful_requests: number;
-    error_rate_pct: number;
-    total_tokens: number;
-  };
 };
 
 export type AdminAnalytics = {
@@ -195,7 +171,6 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
   logout: () => apiFetch<{ ok: true }>("/admin/auth/logout", { method: "POST" }),
-  stats: () => apiFetch<AdminStats>("/admin/stats"),
   myUsage: () => apiFetch<MyUsage>("/admin/me/usage"),
   listAccounts: () =>
     apiFetch<{ accounts: PoolAccountOut[] }>("/admin/accounts"),

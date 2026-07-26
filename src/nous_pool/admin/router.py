@@ -449,7 +449,7 @@ async def list_pool_accounts(_: AuthContext = Depends(require_admin)):
         .order("created_at", desc=False)
         .execute()
     )
-    return r.data or []
+    return {"accounts": r.data or []}
 
 
 @router.post("/admin/accounts/{account_id}/refresh")

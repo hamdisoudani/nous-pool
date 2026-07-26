@@ -6,7 +6,7 @@
  * which sets disabled_at server-side. (Banned users are blocked by the
  * auth/deps.py current_context middleware on EVERY subsequent request.)
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, AppUser, Role } from "@/auth";
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
@@ -32,6 +32,7 @@ export function AdminUsers() {
   const [pending, setPending] = useState<string | null>(null);
   const [banTarget, setBanTarget] = useState<AppUser | null>(null);
   const [banReason, setBanReason] = useState("");
+  const cancelRef = useRef<HTMLButtonElement>(null);
 
   async function load() {
     setLoading(true);
@@ -227,7 +228,15 @@ export function AdminUsers() {
                                     Ban
                                   </Button>
                                 </DialogTrigger>
-                                <DialogContent>
+                                <DialogContent
+                                onOpenAutoFocus={(e) => {
+                                  // Don't auto-focus the textarea on open
+                                  // — that would make Enter immediately
+                                  // submit the destructive Ban action.
+                                  e.preventDefault();
+                                  cancelRef.current?.focus();
+                                }}
+                              >
                                   <DialogHeader>
                                     <DialogTitle>Ban {u.email}?</DialogTitle>
                                     <DialogDescription>
@@ -245,11 +254,21 @@ export function AdminUsers() {
                                       className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                                       value={banReason}
                                       onChange={(e) => setBanReason(e.target.value)}
+                                      onKeyDown={(e) => {
+                                        // Enter inserts a newline; never submits
+                                        // the destructive "Ban user" action.
+                                        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                                          e.preventDefault();
+                                          handleBan(u);
+                                        }
+                                      }}
                                       placeholder="e.g. abuse, spam, ToS violation"
+                                      aria-label="Ban reason"
                                     />
                                   </div>
                                   <DialogFooter>
                                     <Button
+                                      ref={cancelRef}
                                       variant="outline"
                                       onClick={() => {
                                         setBanTarget(null);

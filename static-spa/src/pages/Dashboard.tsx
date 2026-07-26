@@ -47,17 +47,19 @@ function Stat({
   trend?: "up" | "down" | "flat";
 }) {
   return (
-    <Card>
+    <Card className="min-w-0 overflow-hidden">
       <CardContent className="p-6">
-        <div className="flex items-start justify-between">
-          <div className="space-y-1.5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1.5 min-w-0 flex-1">
             <div className="text-sm font-medium text-muted-foreground">
               {label}
             </div>
-            <div className="text-3xl font-bold tabular-nums">{value}</div>
-            {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
+            <div className="text-3xl font-bold tabular-nums truncate" title={String(value)}>
+              {value}
+            </div>
+            {hint && <div className="text-xs text-muted-foreground truncate">{hint}</div>}
           </div>
-          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-muted">
             <Icon className="h-5 w-5" />
           </div>
         </div>
@@ -216,7 +218,8 @@ export function Dashboard({ user }: { user: AppUser }) {
           <h1 className="text-3xl font-bold tracking-tight">
             Welcome back, {user.display_name || user.email.split("@")[0]}
           </h1>
-          <p className="text-muted-foreground mt-1">
+          <p className="text-muted-foreground mt-1 flex items-center gap-2 flex-wrap">
+            <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{user.email}</code>
             {isAdmin
               ? "Operator dashboard — manage users, pool accounts, and view site-wide analytics."
               : "Your Nous Pool account. Mint keys, view usage, integrate with the API."}
@@ -249,11 +252,6 @@ export function Dashboard({ user }: { user: AppUser }) {
             value={user.role}
             icon={isAdmin ? ShieldCheck : KeyRound}
             hint={isAdmin ? "Full administrative access" : "Standard access"}
-          />
-          <Stat
-            label="Email"
-            value={user.email.length > 22 ? user.email.slice(0, 22) + "…" : user.email}
-            icon={Users}
           />
           <Stat
             label="Requests (30d)"

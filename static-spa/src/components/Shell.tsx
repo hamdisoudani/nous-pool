@@ -178,12 +178,13 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Button
               variant="ghost"
               size="sm"
+              aria-label="Sign out"
               onClick={async () => {
                 await logout();
                 navigate("/login");
               }}
             >
-              <LogOut className="h-4 w-4 mr-2" />
+              <LogOut className="h-4 w-4 mr-2" aria-hidden="true" />
               <span className="hidden sm:inline">Sign out</span>
             </Button>
           </div>
@@ -207,6 +208,3 @@ export function AppShell({ children }: { children: ReactNode }) {
     </div>
   );
 }
-
-// Helper kept for backwards import compat — old name alias.
-export const Shell = AppShell;
