@@ -424,14 +424,18 @@ async def start_add_account(body: dict, ctx: AuthContext = Depends(require_admin
 
 @router.get("/admin/models/free")
 async def free_models(_: AuthContext = Depends(require_user)):
-    """The ':free' model ids the pool can serve right now.
+    """The ':free' models the pool can serve right now, with capabilities.
 
     Read live from the upstream catalogue (cached ~10min), so it stays correct
     as Nous adds and retires free-tier models. Any signed-in user can read this
     — it drives the "supported models" panel on their dashboard.
+
+    Each entry carries context window, input/output modalities and capability
+    flags so the UI can tell the user what a model actually accepts instead of
+    just naming it.
     """
-    ids = await dispatcher.get_free_model_ids()
-    return {"models": ids, "count": len(ids)}
+    models = await dispatcher.get_free_models()
+    return {"models": models, "count": len(models)}
 
 
 @router.get("/admin/accounts/flow/{flow_id}")

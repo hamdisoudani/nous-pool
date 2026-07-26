@@ -197,16 +197,80 @@ async def get_upstream_models(force: bool = False) -> list[dict]:
         return models
 
 
-async def get_free_model_ids() -> list[str]:
-    """Just the ':free' model ids, sorted. Empty list if upstream is down —
-    callers treat this as informational, not load-bearing."""
+# Upstream model objects carry ~20 fields each (benchmarks, aliases, pricing
+# tiers, hugging_face_id, …). The dashboard renders a handful, so narrow them
+# here: a smaller payload, and an upstream change to a field we don't use can't
+# reshape our response.
+_MODALITY_ORDER = ("text", "image", "video", "audio", "file")
+
+
+def _sort_modalities(mods: list[str]) -> list[str]:
+    """Canonical modality order.
+
+    Upstream is inconsistent about ordering — the same set comes back as
+    ["text","image","file"] on one model and ["file","image","text"] on the
+    next. Sorting means the UI badges don't reshuffle between rows.
+    """
+    known = [m for m in _MODALITY_ORDER if m in mods]
+    return known + sorted(m for m in mods if m not in _MODALITY_ORDER)
+
+
+def normalize_model(m: dict) -> dict:
+    """Flatten one upstream model object into the shape the dashboard renders.
+
+    Every field degrades to None/[]/False rather than assuming the nested dicts
+    exist: `architecture` is an empty object on 12 of the 289 current upstream
+    entries, and `input_modalities` is explicitly null on 13 more.
+    """
+    arch = m.get("architecture") or {}
+    top = m.get("top_provider") or {}
+    reasoning = m.get("reasoning") or {}
+    params = m.get("supported_parameters") or []
+
+    def _int_or_none(v) -> int | None:
+        return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+    # Upstream reports two context numbers and they disagree — stepfun advertises
+    # context_length 262144 while its serving provider caps at 256000. The
+    # provider's figure is what a request is actually measured against, so it
+    # wins; the top-level value is the fallback when no provider is named.
+    ctx = _int_or_none(top.get("context_length")) or _int_or_none(m.get("context_length"))
+
+    return {
+        "id": m.get("id"),
+        "name": m.get("name") or m.get("id"),
+        "description": (m.get("description") or "").strip() or None,
+        "context_length": ctx,
+        "max_completion_tokens": _int_or_none(top.get("max_completion_tokens")),
+        "input_modalities": _sort_modalities([str(x) for x in (arch.get("input_modalities") or [])]),
+        "output_modalities": _sort_modalities([str(x) for x in (arch.get("output_modalities") or [])]),
+        # e.g. "text+image+video->text" — a compact human-readable summary that
+        # upstream already computes for us.
+        "modality": arch.get("modality"),
+        "supports_reasoning": bool(reasoning),
+        "reasoning_required": bool(reasoning.get("mandatory")),
+        "supports_tools": "tools" in params,
+        "supports_structured_outputs": "structured_outputs" in params,
+        "is_moderated": bool(top.get("is_moderated")),
+    }
+
+
+async def get_free_models() -> list[dict]:
+    """Normalized metadata for every ':free' model, sorted by id.
+
+    Empty list if upstream is unreachable — callers treat this as informational,
+    not load-bearing, so a cold cache degrades to "no models listed" instead of
+    failing the whole dashboard.
+    """
     try:
         models = await get_upstream_models()
     except RuntimeError as e:
         log.warning(f"could not load free models: {e}")
         return []
+    free = [m for m in models if str(m.get("id", "")).endswith(":free")]
     return sorted(
-        str(m.get("id")) for m in models if str(m.get("id", "")).endswith(":free")
+        (normalize_model(m) for m in free),
+        key=lambda m: str(m.get("id") or ""),
     )
 
 

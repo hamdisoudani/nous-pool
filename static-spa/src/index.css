@@ -39,6 +39,15 @@
     --ring: 252 56% 52%;
 
     --radius: 0.5rem;
+
+    /* Syntax palette for <CodeBlock>. Deliberately separate from the semantic
+       tokens above, so retuning the UI accent can't silently recolour code. */
+    --code-comment: 240 4% 50%;
+    --code-string: 142 55% 30%;
+    --code-keyword: 252 56% 52%;
+    --code-fn: 212 74% 42%;
+    --code-number: 25 78% 38%;
+    --code-kwarg: 322 50% 42%;
   }
 
   /* ===== Dark (Linear/Vercel-flavoured near-black) ===== */
@@ -71,6 +80,14 @@
     --border: 240 6% 13%;
     --input: 240 6% 16%;
     --ring: 252 56% 57%;
+
+    /* Lifted lightness so each class clears the near-black card background. */
+    --code-comment: 240 5% 50%;
+    --code-string: 142 52% 58%;
+    --code-keyword: 252 80% 74%;
+    --code-fn: 205 85% 66%;
+    --code-number: 32 85% 62%;
+    --code-kwarg: 322 65% 70%;
   }
 }
 

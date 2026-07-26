@@ -15,6 +15,31 @@ export function compactNumber(n: number): string {
   }).format(n);
 }
 
+/** 3 significant figures with trailing zeros dropped: 262.144 -> "262",
+ *  32.768 -> "32.8", 1.048576 -> "1.05", 1 -> "1". */
+function threeSigFigs(v: number): string {
+  const s = v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2);
+  // Guard the `.`: stripping zeros off "100" would yield "1".
+  return s.includes(".") ? s.replace(/\.?0+$/, "") : s;
+}
+
+/**
+ * Token counts: 262144 -> "262K", 32768 -> "32.8K", 1048576 -> "1.05M".
+ *
+ * Decimal K/M, matching how the upstream catalogue itself displays these, so a
+ * number here can be compared against Nous' own docs without conversion. Never
+ * rounds up to a cleaner-looking figure than the truth — a context window is a
+ * hard limit and "32K" for 32768 would be a lie in the wrong direction. Pair
+ * with a `title` holding the exact integer where precision matters.
+ */
+export function formatTokens(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) return `${threeSigFigs(n / 1_000_000)}M`;
+  if (abs >= 1000) return `${threeSigFigs(n / 1000)}K`;
+  return String(n);
+}
+
 /** "26 Jul 2026, 10:53" — stable width, never wraps mid-cell. */
 export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return "—";

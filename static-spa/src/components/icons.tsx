@@ -225,6 +225,72 @@ export const Moon = (p: IconProps) => (
   </Svg>
 );
 
+/* ---------- model modalities ---------- */
+
+export const Type = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 6.5V5h16v1.5M12 5v14M9 19h6" />
+  </Svg>
+);
+
+export const ImageIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="3" y="4.5" width="18" height="15" rx="2" />
+    <circle cx="8.5" cy="9.5" r="1.5" />
+    <path d="m3.5 16.5 4.5-4 4 3.5 3.5-3 5 4.5" />
+  </Svg>
+);
+
+export const Video = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="2.5" y="6" width="13" height="12" rx="2" />
+    <path d="m15.5 11 6-3.5v9l-6-3.5z" />
+  </Svg>
+);
+
+export const Audio = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 10v4M8 7v10M12 4.5v15M16 8v8M20 10.5v3" />
+  </Svg>
+);
+
+export const FileIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M14 3H7a1.5 1.5 0 0 0-1.5 1.5v15A1.5 1.5 0 0 0 7 21h10a1.5 1.5 0 0 0 1.5-1.5V7.5z" />
+    <path d="M14 3v4.5h4.5" />
+  </Svg>
+);
+
+/** Reasoning / thinking capability. */
+export const Sparkles = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="m10 4 1.4 3.9L15.5 9.3l-4.1 1.4L10 14.6l-1.4-3.9L4.5 9.3l4.1-1.4z" />
+    <path d="M17.5 14.5l.8 2.1 2.2.8-2.2.8-.8 2.1-.8-2.1-2.2-.8 2.2-.8z" />
+  </Svg>
+);
+
+/** Tool / function calling capability. */
+export const Wrench = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M15.2 6.2a3.8 3.8 0 0 1 5.2 4.9l-2-2-2.4.6-.6-2.4z" />
+    <path d="m14.4 8.4-9 9a2 2 0 0 0 2.8 2.8l9-9" />
+  </Svg>
+);
+
+/** Structured-output / JSON-schema capability. */
+export const Braces = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M8.5 3.5c-2 0-2.5 1-2.5 2.5v2.5c0 1.5-.8 2.5-2 3.5 1.2 1 2 2 2 3.5V18c0 1.5.5 2.5 2.5 2.5" />
+    <path d="M15.5 3.5c2 0 2.5 1 2.5 2.5v2.5c0 1.5.8 2.5 2 3.5-1.2 1-2 2-2 3.5V18c0 1.5-.5 2.5-2.5 2.5" />
+  </Svg>
+);
+
+export const ArrowRight = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 12h15m0 0-5.5-5.5M19 12l-5.5 5.5" />
+  </Svg>
+);
+
 /** Wordmark glyph used for the brand square and favicon. */
 export const NousMark = (p: IconProps) => (
   <svg

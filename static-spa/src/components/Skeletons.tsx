@@ -88,17 +88,32 @@ export function DetailCardSkeleton({ rows = 4 }: { rows?: number }) {
   );
 }
 
-/** Row of pill placeholders — used by the supported-models panel. */
-export function PillsSkeleton({ count = 4 }: { count?: number }) {
-  const widths = ["148px", "160px", "132px", "118px"];
+/**
+ * Grid of model-card placeholders — used by the supported-models panel.
+ * Mirrors <ModelCard>: title, id line, modality row, stats row, chips row.
+ */
+export function ModelCardsSkeleton({ count = 4 }: { count?: number }) {
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div className="grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
       {Array.from({ length: count }, (_, i) => (
-        <Skeleton
+        <div
           key={i}
-          className="h-6 rounded-md"
-          style={{ width: widths[i % widths.length] }}
-        />
+          className="flex min-w-0 flex-col gap-2 rounded-lg border border-border bg-muted/30 p-3"
+        >
+          <div>
+            <Skeleton className="h-3.5 w-32" />
+            <Skeleton className="mt-1.5 h-2.5 w-full max-w-[180px]" />
+          </div>
+          <div className="flex gap-1">
+            <Skeleton className="h-4 w-12 rounded" />
+            <Skeleton className="h-4 w-12 rounded" />
+          </div>
+          <Skeleton className="h-3 w-40" />
+          <div className="flex gap-1">
+            <Skeleton className="h-4 w-16 rounded-full" />
+            <Skeleton className="h-4 w-12 rounded-full" />
+          </div>
+        </div>
       ))}
     </div>
   );

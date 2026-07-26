@@ -42,6 +42,33 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   return r.json();
 }
 
+/** A modality the upstream catalogue reports. Widened with `string` because
+ *  Nous adds these over time and an unknown one should render as a plain label
+ *  rather than break the type. */
+export type Modality = "text" | "image" | "video" | "audio" | "file" | string;
+
+/**
+ * One free-tier model, as flattened by the backend from the upstream Nous
+ * catalogue. Numbers are null when upstream omits them — 12 of ~289 current
+ * entries carry no `architecture` object at all.
+ */
+export type ModelInfo = {
+  id: string;
+  name: string;
+  description: string | null;
+  context_length: number | null;
+  max_completion_tokens: number | null;
+  input_modalities: Modality[];
+  output_modalities: Modality[];
+  /** Upstream's own summary, e.g. "text+image+video->text". */
+  modality: string | null;
+  supports_reasoning: boolean;
+  reasoning_required: boolean;
+  supports_tools: boolean;
+  supports_structured_outputs: boolean;
+  is_moderated: boolean;
+};
+
 export type InitiateOAuthResp = {
   flow_id: string;
   user_code: string;
@@ -172,9 +199,9 @@ export const api = {
     }),
   logout: () => apiFetch<{ ok: true }>("/admin/auth/logout", { method: "POST" }),
   myUsage: () => apiFetch<MyUsage>("/admin/me/usage"),
-  /** ':free' model ids, read live from the upstream Nous catalogue. */
+  /** ':free' models with capabilities, read live from the upstream Nous catalogue. */
   freeModels: () =>
-    apiFetch<{ models: string[]; count: number }>("/admin/models/free"),
+    apiFetch<{ models: ModelInfo[]; count: number }>("/admin/models/free"),
   listAccounts: () =>
     apiFetch<{ accounts: PoolAccountOut[] }>("/admin/accounts"),
   initiateAddAccount: (label: string) =>
