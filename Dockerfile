@@ -9,7 +9,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# System deps
+# System deps (Python + Node + curl for healthcheck)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl nodejs npm \
     && rm -rf /var/lib/apt/lists/*
@@ -40,11 +40,10 @@ COPY src/ ./src/
 # ---- Runtime ----
 EXPOSE 8000
 
-ENV NOUS_POOL_HOST=0.0.0.0 \
-    NOUS_POOL_PORT=8000
+ENV NOUS_POOL_HOST=0.0.0.0
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD curl -sf http://127.0.0.1:8000/healthz || exit 1
+    CMD curl -sf "http://127.0.0.1:${PORT:-8000}/healthz" || exit 1
 
-# Bind to Railway's PORT env var (Railway default for containers is often 8080)
-CMD ["sh", "-c", "echo \"=== PORT env: ${PORT:-unset} ===\" && echo '=== Booting nous-pool ===' && exec python -m uvicorn nous_pool.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --log-level info 2>&1"]
+# Railway injects PORT=8080 by default — bind to whichever it says.
+CMD ["sh", "-c", "exec python -m uvicorn nous_pool.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --log-level info"]
