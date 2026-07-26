@@ -1,6 +1,11 @@
 # syntax=docker/dockerfile:1.6
 FROM python:3.11-slim AS base
 
+# Cache-bust marker — bump when src/ files don't change but Railway BuildKit
+# cached the COPY layer. The RUN below invalidates the next COPY src/ step.
+ARG RAILWAY_CACHE_BUST=2026-07-26-12-00
+RUN echo "RAILWAY_CACHE_BUST=$RAILWAY_CACHE_BUST" > /tmp/cache_bust.txt
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
