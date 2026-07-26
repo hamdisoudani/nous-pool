@@ -847,7 +847,7 @@ async def ban_user(
 
     # 2) Revoke all of their API keys (best-effort; logged not fatal)
     supabase_admin().table("api_keys").update(
-        {"is_active": False, "revoked_at": now}
+        {"is_active": False}
     ).eq("user_id", user_id).eq("is_active", True).execute()
 
     return {"ok": True, "user_id": user_id, "disabled_at": now, "reason": reason}
