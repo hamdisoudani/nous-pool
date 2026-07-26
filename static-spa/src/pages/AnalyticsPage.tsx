@@ -8,19 +8,16 @@
 import { useEffect, useState } from "react";
 import { api, AdminAnalytics } from "@/auth";
 import {
-  Card, CardContent, CardDescription, CardHeader, CardTitle,
+  Card, CardContent, CardHeader, CardTitle,
 } from "@/components/ui/card";
 import {
   Table, TableHeader, TableRow, TableHead, TableBody, TableCell,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import {
-  TrendingUp, Users, KeyRound, Database, RefreshCw,
-} from "lucide-react";
-
-function formatNumber(n: number) {
-  return new Intl.NumberFormat().format(n);
-}
+import { Button } from "@/components/ui/button";
+import { PageHeader, SectionLabel, StatTile } from "@/components/PageHeader";
+import { StatGridSkeleton, TableCardSkeleton } from "@/components/Skeletons";
+import { formatNumber, percent } from "@/lib/format";
+import { RefreshCw } from "@/components/icons";
 
 export function AnalyticsPage() {
   const [a, setA] = useState<AdminAnalytics | null>(null);
@@ -44,8 +41,23 @@ export function AnalyticsPage() {
 
   if (loading) {
     return (
-      <div className="p-8 text-center text-muted-foreground">
-        Loading analytics…
+      <div className="space-y-6">
+        <PageHeader
+          title="Site analytics"
+          description="Aggregate traffic across every user, key and pool account."
+        />
+        <div>
+          <SectionLabel>Overview</SectionLabel>
+          <StatGridSkeleton count={4} />
+        </div>
+        <div>
+          <SectionLabel>Traffic by window</SectionLabel>
+          <TableCardSkeleton
+            rows={3}
+            widths={["48px", "60px", "70px", "60px", "70px", "80px"]}
+          />
+        </div>
+        <TableCardSkeleton rows={3} widths={["24px", "45%", "70px", "70px"]} />
       </div>
     );
   }
@@ -58,156 +70,180 @@ export function AnalyticsPage() {
   }
   if (!a) return null;
 
-  const err30 = a.requests["30d"].requests
-    ? ((a.requests["30d"].errors / a.requests["30d"].requests) * 100).toFixed(1)
-    : "0.0";
+  const err30 = percent(a.requests["30d"].errors, a.requests["30d"].requests);
 
   return (
-    <div className="space-y-8">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Site analytics</h1>
-          <p className="text-muted-foreground mt-1">
-            Aggregate counts across all users, requests, errors. Server-side computed.
-          </p>
-        </div>
-        <button
-          onClick={load}
-          className="inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
-        >
-          <RefreshCw className="h-4 w-4" /> Refresh
-        </button>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Site analytics"
+        description="Aggregate traffic across every user, key and pool account."
+        actions={
+          <Button variant="outline" size="sm" onClick={load}>
+            <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Refresh
+          </Button>
+        }
+      />
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardContent className="p-6">
-            <div className="text-sm font-medium text-muted-foreground">Users</div>
-            <div className="text-3xl font-bold tabular-nums mt-1.5">
-              {formatNumber(a.users.total)}
-            </div>
-            <div className="text-xs text-muted-foreground mt-1">
-              {formatNumber(a.users.active)} active · {formatNumber(a.users.banned)} banned
-              · {formatNumber(a.users.admins)} admins
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6">
-            <div className="text-sm font-medium text-muted-foreground">Active API keys</div>
-            <div className="text-3xl font-bold tabular-nums mt-1.5">
-              {formatNumber(a.api_keys.active)}
-            </div>
-            <div className="text-xs text-muted-foreground mt-1">
-              {formatNumber(a.api_keys.total)} total · {formatNumber(a.api_keys.revoked)} revoked
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6">
-            <div className="text-sm font-medium text-muted-foreground">Pool accounts</div>
-            <div className="text-3xl font-bold tabular-nums mt-1.5">
-              {formatNumber(a.pool_accounts.total)}
-            </div>
-            <div className="text-xs text-muted-foreground mt-1">
-              {formatNumber(a.pool_accounts.active)} active ·{" "}
-              {formatNumber(a.pool_accounts.disabled)} disabled ·{" "}
-              {formatNumber(a.pool_accounts.dead)} dead
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6">
-            <div className="text-sm font-medium text-muted-foreground">Error rate (30d)</div>
-            <div className="text-3xl font-bold tabular-nums mt-1.5">
-              {a.requests["30d"].requests > 0
-                ? <>{err30}<span className="text-base text-muted-foreground">%</span></>
-                : <span className="text-muted-foreground">—</span>}
-            </div>
-            <div className="text-xs text-muted-foreground mt-1">
-              {formatNumber(a.requests["30d"].errors)} of{" "}
-              {formatNumber(a.requests["30d"].requests)}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Three time-windows */}
-      <div className="grid gap-4 md:grid-cols-3">
-        {(["24h", "7d", "30d"] as const).map((w) => {
-          const r = a.requests[w];
-          const err = r.requests ? ((r.errors / r.requests) * 100).toFixed(1) : "0.0";
-          return (
-            <Card key={w}>
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between text-base">
-                  <span className="flex items-center gap-2">
-                    <TrendingUp className="h-4 w-4" /> {w}
+      <div>
+        <SectionLabel>Overview</SectionLabel>
+        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+          <StatTile
+            label="Users"
+            value={formatNumber(a.users.total)}
+            hint={`${a.users.active} active · ${a.users.banned} banned · ${a.users.admins} admin`}
+          />
+          <StatTile
+            label="Active API keys"
+            value={formatNumber(a.api_keys.active)}
+            hint={`${a.api_keys.total} total · ${a.api_keys.revoked} revoked`}
+          />
+          <StatTile
+            label="Pool accounts"
+            value={formatNumber(a.pool_accounts.total)}
+            tone={a.pool_accounts.total === 0 ? "warning" : "default"}
+            hint={
+              a.pool_accounts.total === 0
+                ? "None yet — the proxy will return 503"
+                : `${a.pool_accounts.active} healthy · ${a.pool_accounts.dead} dead`
+            }
+          />
+          <StatTile
+            label="Error rate (30d)"
+            value={
+              a.requests["30d"].requests > 0 ? (
+                <>
+                  {err30}
+                  <span className="text-base font-normal text-muted-foreground">
+                    %
                   </span>
-                  <Badge variant={Number(err) > 5 ? "destructive" : "secondary"}>
-                    {err}% errors
-                  </Badge>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-1.5 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Requests</span>
-                  <span className="tabular-nums">{formatNumber(r.requests)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Total tokens</span>
-                  <span className="tabular-nums">{formatNumber(r.total_tokens)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Prompt</span>
-                  <span className="tabular-nums">{formatNumber(r.prompt_tokens)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Completion</span>
-                  <span className="tabular-nums">{formatNumber(r.completion_tokens)}</span>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
+                </>
+              ) : (
+                <span className="text-muted-foreground">—</span>
+              )
+            }
+            tone={Number(err30) > 5 ? "destructive" : "default"}
+            hint={`${formatNumber(a.requests["30d"].errors)} of ${formatNumber(
+              a.requests["30d"].requests,
+            )} requests`}
+          />
+        </div>
+      </div>
+
+      {/* Three time-windows, as one comparison table rather than three cards */}
+      <div>
+        <SectionLabel>Traffic by window</SectionLabel>
+        <Card>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="h-9 w-24 text-[11px] uppercase tracking-[0.06em]">
+                    Window
+                  </TableHead>
+                  <TableHead className="h-9 text-right text-[11px] uppercase tracking-[0.06em]">
+                    Requests
+                  </TableHead>
+                  <TableHead className="h-9 text-right text-[11px] uppercase tracking-[0.06em]">
+                    Errors
+                  </TableHead>
+                  <TableHead className="h-9 text-right text-[11px] uppercase tracking-[0.06em]">
+                    Prompt
+                  </TableHead>
+                  <TableHead className="h-9 text-right text-[11px] uppercase tracking-[0.06em]">
+                    Completion
+                  </TableHead>
+                  <TableHead className="h-9 text-right text-[11px] uppercase tracking-[0.06em]">
+                    Total tokens
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(["24h", "7d", "30d"] as const).map((w) => {
+                  const r = a.requests[w];
+                  const err = percent(r.errors, r.requests);
+                  return (
+                    <TableRow key={w} className="h-10">
+                      <TableCell className="py-1.5 font-medium">{w}</TableCell>
+                      <TableCell className="py-1.5 text-right tabular-nums">
+                        {formatNumber(r.requests)}
+                      </TableCell>
+                      <TableCell
+                        className={`py-1.5 text-right tabular-nums ${
+                          r.errors > 0 ? "text-destructive" : "text-muted-foreground"
+                        }`}
+                      >
+                        {formatNumber(r.errors)}
+                        {r.requests > 0 && (
+                          <span className="ml-1 text-xs text-muted-foreground">
+                            ({err}%)
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell className="py-1.5 text-right tabular-nums text-muted-foreground">
+                        {formatNumber(r.prompt_tokens)}
+                      </TableCell>
+                      <TableCell className="py-1.5 text-right tabular-nums text-muted-foreground">
+                        {formatNumber(r.completion_tokens)}
+                      </TableCell>
+                      <TableCell className="py-1.5 text-right font-medium tabular-nums">
+                        {formatNumber(r.total_tokens)}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Top users */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Users className="h-5 w-5" /> Top users by tokens (30d)
+        <CardHeader className="px-4 py-3">
+          <CardTitle className="text-[13px] font-semibold">
+            Top users by tokens · 30 days
           </CardTitle>
-          <CardDescription>
-            Aggregate from request_logs joined to app_users.email.
-          </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
           {a.top_users_30d.length === 0 ? (
-            <div className="p-8 text-center text-muted-foreground">
+            <div className="border-t border-border p-8 text-center text-[13px] text-muted-foreground">
               No traffic recorded yet.
             </div>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-12">#</TableHead>
-                  <TableHead>User</TableHead>
-                  <TableHead>User ID</TableHead>
-                  <TableHead className="text-right">Total tokens</TableHead>
+                  <TableHead className="h-9 w-10 text-[11px] uppercase tracking-[0.06em]">
+                    #
+                  </TableHead>
+                  <TableHead className="h-9 text-[11px] uppercase tracking-[0.06em]">
+                    User
+                  </TableHead>
+                  <TableHead className="h-9 w-28 text-[11px] uppercase tracking-[0.06em]">
+                    ID
+                  </TableHead>
+                  <TableHead className="h-9 w-32 text-right text-[11px] uppercase tracking-[0.06em]">
+                    Total tokens
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {a.top_users_30d.map((u, i) => (
-                  <TableRow key={u.user_id}>
-                    <TableCell className="text-muted-foreground tabular-nums">#{i + 1}</TableCell>
-                    <TableCell className="font-medium">{u.email}</TableCell>
-                    <TableCell>
+                  <TableRow key={u.user_id} className="h-10">
+                    <TableCell className="py-1.5 tabular-nums text-muted-foreground">
+                      {i + 1}
+                    </TableCell>
+                    <TableCell className="max-w-0 py-1.5">
+                      <span className="block truncate font-medium" title={u.email}>
+                        {u.email}
+                      </span>
+                    </TableCell>
+                    <TableCell className="py-1.5">
                       <code className="text-xs text-muted-foreground">
-                        {u.user_id.slice(0, 8)}…
+                        {u.user_id.slice(0, 8)}
                       </code>
                     </TableCell>
-                    <TableCell className="text-right tabular-nums font-medium">
+                    <TableCell className="py-1.5 text-right font-medium tabular-nums">
                       {formatNumber(u.total_tokens)}
                     </TableCell>
                   </TableRow>

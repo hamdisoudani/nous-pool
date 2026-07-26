@@ -8,7 +8,8 @@ import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
 } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Loader2, LogIn, UserPlus, KeyRound } from "lucide-react";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { Loader2, LogIn, UserPlus, KeyRound, NousMark } from "@/components/icons";
 import { cn } from "@/lib/utils";
 
 type Mode = "signin" | "signup";
@@ -68,16 +69,20 @@ export function LoginPage() {
   }
 
   return (
-    <div className="min-h-[100dvh] grid place-items-center bg-gradient-to-br from-background via-background to-muted/40 p-6">
-      <Card className="w-full max-w-md animate-fade-in">
-        <CardHeader className="space-y-3 text-center pb-2">
-          <div className="mx-auto h-12 w-12 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-white font-bold text-xl">
-            N
+    <div className="relative grid min-h-[100dvh] place-items-center bg-background p-6">
+      <div className="absolute right-4 top-4">
+        <ThemeToggle />
+      </div>
+
+      <Card className="w-full max-w-[380px] animate-fade-in">
+        <CardHeader className="space-y-2.5 pb-3 text-center">
+          <div className="mx-auto flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <NousMark className="h-5 w-5" />
           </div>
-          <CardTitle className="text-2xl">
+          <CardTitle className="text-lg">
             {mode === "signin" ? "Sign in to Nous Pool" : "Create your account"}
           </CardTitle>
-          <CardDescription>
+          <CardDescription className="text-[13px]">
             {mode === "signin"
               ? "OpenAI-compatible proxy with pooled accounts"
               : "Sign up to get your Nous Pool API key"}
@@ -85,7 +90,7 @@ export function LoginPage() {
         </CardHeader>
 
         <CardContent>
-          <div className="grid grid-cols-2 mb-6 rounded-md border bg-muted p-1 text-sm">
+          <div className="mb-5 grid grid-cols-2 rounded-md border border-border bg-muted p-0.5 text-[13px]">
             <button
               type="button"
               onClick={() => { setMode("signin"); setError(null); }}
@@ -202,12 +207,12 @@ export function LoginPage() {
             </p>
           </form>
 
-          <div className="mt-6 pt-6 border-t">
+          <div className="mt-5 border-t border-border pt-4">
             <div className="flex items-start gap-2 text-xs text-muted-foreground">
-              <KeyRound className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+              <KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <p>
-                First user to sign up is promoted to admin. Subsequent users get
-                the <code className="text-foreground">user</code> role.
+                The first account to sign up becomes the admin. Everyone after
+                that joins as a standard user.
               </p>
             </div>
           </div>

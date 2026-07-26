@@ -1,51 +1,76 @@
+/* IBM Plex Sans (variable) + IBM Plex Mono are imported in main.tsx via
+   @fontsource, so Vite bundles the woff2 files — no Google Fonts request. */
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
+  /* ===== Light ===== */
   :root {
     --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
+    --foreground: 240 10% 8%;
+
     --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
+    --card-foreground: 240 10% 8%;
     --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 3.9%;
-    --primary: 240 5.9% 10%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 240 4.8% 95.9%;
-    --secondary-foreground: 240 5.9% 10%;
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 240 5.9% 10%;
+    --popover-foreground: 240 10% 8%;
+
+    /* Violet accent — reserved for primary actions and focus rings. */
+    --primary: 252 56% 52%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 240 5% 96%;
+    --secondary-foreground: 240 10% 12%;
+    --muted: 240 5% 96%;
+    --muted-foreground: 240 4% 42%;
+    --accent: 240 5% 94%;
+    --accent-foreground: 240 10% 12%;
+
+    --destructive: 0 72% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 71% 34%;
+    --success-foreground: 0 0% 100%;
+    --warning: 32 90% 42%;
+    --warning-foreground: 0 0% 100%;
+
+    --border: 240 6% 90%;
+    --input: 240 6% 87%;
+    --ring: 252 56% 52%;
+
     --radius: 0.5rem;
   }
 
+  /* ===== Dark (Linear/Vercel-flavoured near-black) ===== */
   .dark {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 5.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 10% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 240 5.9% 10%;
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 240 4.9% 83.9%;
+    --background: 240 11% 4%;
+    --foreground: 240 10% 96%;
+
+    --card: 240 9% 7%;
+    --card-foreground: 240 10% 96%;
+    --popover: 240 9% 7%;
+    --popover-foreground: 240 10% 96%;
+
+    --primary: 252 56% 57%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 240 6% 12%;
+    --secondary-foreground: 240 10% 96%;
+    --muted: 240 6% 12%;
+    --muted-foreground: 240 5% 62%;
+    --accent: 240 6% 15%;
+    --accent-foreground: 240 10% 96%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 69% 45%;
+    --success-foreground: 240 11% 4%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 240 11% 4%;
+
+    --border: 240 6% 13%;
+    --input: 240 6% 16%;
+    --ring: 252 56% 57%;
   }
 }
 
@@ -53,12 +78,65 @@
   * {
     @apply border-border;
   }
+
   html {
     scrollbar-gutter: stable;
+    -webkit-tap-highlight-color: transparent;
   }
-  html, body {
+
+  html,
+  body {
     @apply bg-background text-foreground antialiased;
-    font-feature-settings: "rlig" 1, "calt" 1;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss02" 1;
+  }
+
+  body {
+    font-size: 13.5px;
+    line-height: 1.5;
+  }
+
+  /* Tighter tracking on display text — Plex runs wide by default. */
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-semibold;
+    letter-spacing: -0.014em;
+  }
+
+  h1 {
+    letter-spacing: -0.021em;
+  }
+
+  /* Numbers should never shift width when they change. */
+  .tabular-nums,
+  th,
+  td {
+    font-variant-numeric: tabular-nums;
+  }
+
+  code,
+  pre,
+  kbd,
+  samp {
+    @apply font-mono;
+    font-feature-settings: "liga" 0;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+}
+
+@layer components {
+  /* Section label — small caps heading used above card grids. */
+  .section-label {
+    @apply text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground;
+  }
+
+  /* Hairline surface used for stat tiles. */
+  .surface {
+    @apply rounded-lg border border-border bg-card;
   }
 }
 

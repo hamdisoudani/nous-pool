@@ -192,7 +192,7 @@ async def poll_device_code_once(flow_id: str) -> dict:
             "health_status": "healthy",
             "weight": 1.0,
             "max_concurrent": s.pool_default_max_concurrent,
-            "supported_models": _detect_models_for_token(access_token),
+            "supported_models": await _detect_models_for_token(access_token),
         })
         .execute()
     )
@@ -353,33 +353,32 @@ async def refresh_all_due() -> dict:
 # ============================================================
 
 
-def _detect_models_for_token(access_token: str) -> list[str]:
-    """Try a quick request with known free models; return those that work."""
-    base = "https://inference-api.nousresearch.com/v1"
-    candidates = [
-        "stepfun/step-3.7-flash:free",
-        "deepseek/deepseek-chat:free",
-        "meta-llama/llama-3.3-70b-instruct:free",
-        "openai/gpt-oss-20b:free",
-        "openai/gpt-oss-120b:free",
-        "qwen/qwen3-32b:free",
-    ]
-    supported: list[str] = []
-    import httpx as _h
-    for model in candidates:
-        try:
-            r = _h.post(
-                f"{base}/chat/completions",
-                headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
-                json={
-                    "model": model,
-                    "messages": [{"role": "user", "content": "hi"}],
-                    "max_tokens": 1,
-                },
-                timeout=20,
+async def _detect_models_for_token(access_token: str) -> list[str]:
+    """Return the ':free' model ids this token can reach, from GET /v1/models.
+
+    Previously this fired a real chat completion at a hardcoded candidate list.
+    That was slow (up to 6 x 20s of *synchronous* httpx inside an async handler,
+    blocking the whole event loop) and wrong — most of those ids no longer
+    exist upstream, so a healthy account looked like it supported one model.
+    """
+    s = _settings()
+    base = s.inference_base_url
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get(
+                f"{base}/models",
+                headers={"Authorization": f"Bearer {access_token}"},
             )
-            if r.status_code == 200:
-                supported.append(model)
-        except Exception:
-            pass
-    return supported or candidates[:2]
+        if r.status_code >= 400:
+            log.warning(f"model detection: upstream returned {r.status_code}")
+            return []
+        body = r.json()
+        models = body.get("data", body) if isinstance(body, dict) else body
+        return sorted(
+            str(m.get("id"))
+            for m in models
+            if str(m.get("id", "")).endswith(":free")
+        )
+    except Exception as e:
+        log.warning(f"model detection failed: {e}")
+        return []

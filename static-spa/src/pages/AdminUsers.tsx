@@ -8,11 +8,12 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { api, AppUser, Role } from "@/auth";
-import {
-  Card, CardContent, CardDescription, CardHeader, CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/PageHeader";
+import { TableCardSkeleton } from "@/components/Skeletons";
+import { formatDateTime, formatRelative } from "@/lib/format";
 import {
   Table, TableHeader, TableRow, TableHead, TableBody, TableCell,
 } from "@/components/ui/table";
@@ -20,9 +21,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  ShieldAlert, RefreshCw, Users, Ban, ShieldCheck, Crown,
-} from "lucide-react";
+import { RefreshCw, Ban, ShieldCheck } from "@/components/icons";
 
 export function AdminUsers() {
   const [users, setUsers] = useState<AppUser[]>([]);
@@ -91,34 +90,24 @@ export function AdminUsers() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Users</h1>
-          <p className="text-muted-foreground mt-1">
-            All registered accounts. Ban/unban &amp; promote/demote via this table.
-          </p>
-        </div>
-        <Button variant="outline" onClick={load}>
-          <RefreshCw className="h-4 w-4 mr-1" /> Refresh
-        </Button>
-      </div>
-
-      <Card className="border-amber-500/30 bg-amber-500/5">
-        <CardContent className="p-4 flex items-start gap-3">
-          <ShieldAlert className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
-          <div className="text-sm space-y-1">
-            <div className="font-medium">All actions here are server-side.</div>
-            <p className="text-muted-foreground">
-              Banning a user sets <code>disabled_at</code> via{" "}
-              <code>POST /admin/users/{'{id}'}/ban</code>. The auth middleware{" "}
-              <code>current_context</code> then returns{" "}
-              <code>403 user_disabled</code> on every protected route, and{" "}
-              <code>api_keys</code> for that user are revoked in the same
-              transaction. The frontend never touches Supabase directly.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+      <PageHeader
+        title="Users"
+        description={
+          loading
+            ? "Loading accounts…"
+            : `${users.length} account${users.length === 1 ? "" : "s"} · ` +
+              `${users.filter((u) => !u.disabled_at).length} active · ` +
+              `${users.filter((u) => u.disabled_at).length} banned`
+        }
+        actions={
+          <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+            <RefreshCw
+              className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`}
+            />
+            Refresh
+          </Button>
+        }
+      />
 
       {error && (
         <div className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm">
@@ -126,21 +115,15 @@ export function AdminUsers() {
         </div>
       )}
 
+      {loading ? (
+        <TableCardSkeleton
+          rows={8}
+          widths={["55%", "42px", "48px", "56px", "56px", "150px"]}
+        />
+      ) : (
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Users className="h-5 w-5" /> {users.length} user{users.length === 1 ? "" : "s"}
-          </CardTitle>
-          <CardDescription>
-            First user is auto-promoted to admin on signup.
-          </CardDescription>
-        </CardHeader>
         <CardContent className="p-0">
-          {loading ? (
-            <div className="p-8 text-center text-muted-foreground">
-              Loading…
-            </div>
-          ) : users.length === 0 ? (
+          {users.length === 0 ? (
             <div className="p-8 text-center text-muted-foreground">
               No users yet.
             </div>
@@ -148,12 +131,24 @@ export function AdminUsers() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Last login</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="h-9 w-full text-[11px] uppercase tracking-[0.06em]">
+                    Email
+                  </TableHead>
+                  <TableHead className="h-9 w-[92px] text-[11px] uppercase tracking-[0.06em]">
+                    Role
+                  </TableHead>
+                  <TableHead className="h-9 w-[92px] text-[11px] uppercase tracking-[0.06em]">
+                    Status
+                  </TableHead>
+                  <TableHead className="h-9 w-[104px] whitespace-nowrap text-[11px] uppercase tracking-[0.06em]">
+                    Last login
+                  </TableHead>
+                  <TableHead className="h-9 w-[104px] whitespace-nowrap text-[11px] uppercase tracking-[0.06em]">
+                    Created
+                  </TableHead>
+                  <TableHead className="h-9 w-[188px] text-right text-[11px] uppercase tracking-[0.06em]">
+                    Actions
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -161,49 +156,61 @@ export function AdminUsers() {
                   const isMe = me?.id === u.id;
                   const isBanned = !!u.disabled_at;
                   return (
-                    <TableRow key={u.id}>
-                      <TableCell className="font-medium">
-                        {u.email}
-                        {isMe && (
-                          <Badge variant="outline" className="ml-2 text-[10px]">
-                            you
-                          </Badge>
-                        )}
+                    <TableRow key={u.id} className="h-11">
+                      <TableCell className="max-w-0 py-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate font-medium" title={u.email}>
+                            {u.email}
+                          </span>
+                          {isMe && (
+                            <Badge
+                              variant="outline"
+                              className="shrink-0 px-1 py-0 text-[10px]"
+                            >
+                              you
+                            </Badge>
+                          )}
+                        </div>
                       </TableCell>
-                      <TableCell>
-                        {isMe ? (
-                          <Badge variant="default">
-                            <Crown className="h-3 w-3 mr-1" /> {u.role}
-                          </Badge>
-                        ) : u.role === "admin" ? (
-                          <Badge variant="default">{u.role}</Badge>
-                        ) : (
-                          <Badge variant="secondary">{u.role}</Badge>
-                        )}
+                      <TableCell className="py-1.5">
+                        <Badge
+                          variant={u.role === "admin" ? "default" : "secondary"}
+                          className="px-1.5 py-0 text-[10px] font-medium uppercase tracking-wide"
+                        >
+                          {u.role}
+                        </Badge>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="py-1.5">
                         {isBanned ? (
-                          <Badge variant="destructive">
-                            <Ban className="h-3 w-3 mr-1" /> banned
+                          <Badge
+                            variant="destructive"
+                            className="px-1.5 py-0 text-[10px] font-medium uppercase tracking-wide"
+                          >
+                            banned
                           </Badge>
                         ) : (
-                          <Badge variant="secondary">active</Badge>
+                          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <span className="h-1.5 w-1.5 rounded-full bg-success" />
+                            active
+                          </span>
                         )}
                       </TableCell>
-                      <TableCell className="text-muted-foreground text-sm">
-                        {u.last_login_at
-                          ? new Date(u.last_login_at).toLocaleString()
-                          : "never"}
+                      <TableCell
+                        className="whitespace-nowrap py-1.5 text-xs text-muted-foreground"
+                        title={formatDateTime(u.last_login_at)}
+                      >
+                        {formatRelative(u.last_login_at)}
                       </TableCell>
-                      <TableCell className="text-muted-foreground text-sm">
-                        {u.created_at
-                          ? new Date(u.created_at).toLocaleString()
-                          : "—"}
+                      <TableCell
+                        className="whitespace-nowrap py-1.5 text-xs text-muted-foreground"
+                        title={formatDateTime(u.created_at)}
+                      >
+                        {formatRelative(u.created_at)}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="py-1.5 text-right">
                         {isMe ? (
                           <span className="text-xs text-muted-foreground">
-                            (can't act on yourself)
+                            —
                           </span>
                         ) : (
                           <div className="flex justify-end gap-2">
@@ -221,10 +228,11 @@ export function AdminUsers() {
                                   <Button
                                     size="sm"
                                     variant="outline"
+                                    className="h-7 px-2 text-xs"
                                     onClick={() => setBanTarget(u)}
                                     disabled={pending === u.id}
                                   >
-                                    <Ban className="h-3 w-3 mr-1" />
+                                    <Ban className="mr-1 h-3 w-3" />
                                     Ban
                                   </Button>
                                 </DialogTrigger>
@@ -238,12 +246,14 @@ export function AdminUsers() {
                                 }}
                               >
                                   <DialogHeader>
-                                    <DialogTitle>Ban {u.email}?</DialogTitle>
+                                    <DialogTitle className="truncate">
+                                      Ban {u.email}?
+                                    </DialogTitle>
                                     <DialogDescription>
-                                      All their API keys will be revoked and they
-                                      won't be able to log back in. This runs
-                                      server-side via{" "}
-                                      <code>POST /admin/users/{u.id.slice(0, 8)}…/ban</code>.
+                                      All of their API keys will be revoked
+                                      immediately and they won't be able to sign
+                                      back in. You can unban them later, but the
+                                      revoked keys stay revoked.
                                     </DialogDescription>
                                   </DialogHeader>
                                   <div className="space-y-2">
@@ -292,32 +302,25 @@ export function AdminUsers() {
                               <Button
                                 size="sm"
                                 variant="outline"
+                                className="h-7 px-2 text-xs"
                                 onClick={() => handleUnban(u)}
                                 disabled={pending === u.id}
                               >
-                                <ShieldCheck className="h-3 w-3 mr-1" />
+                                <ShieldCheck className="mr-1 h-3 w-3" />
                                 Unban
                               </Button>
                             )}
-                            {u.role !== "admin" ? (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleRole(u, "admin")}
-                                disabled={pending === u.id}
-                              >
-                                Promote
-                              </Button>
-                            ) : (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleRole(u, "user")}
-                                disabled={pending === u.id}
-                              >
-                                Demote
-                              </Button>
-                            )}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-xs"
+                              onClick={() =>
+                                handleRole(u, u.role === "admin" ? "user" : "admin")
+                              }
+                              disabled={pending === u.id}
+                            >
+                              {u.role === "admin" ? "Demote" : "Promote"}
+                            </Button>
                           </div>
                         )}
                       </TableCell>
@@ -329,6 +332,7 @@ export function AdminUsers() {
           )}
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }

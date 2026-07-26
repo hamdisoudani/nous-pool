@@ -407,8 +407,31 @@ async def start_add_account(body: dict, ctx: AuthContext = Depends(require_admin
     label = body.get("label", "").strip()
     if not label:
         raise HTTPException(400, {"error": "missing_label"})
-    flow = await hermes_oauth.start_device_code_flow(label, ctx.user_id)
-    return flow
+    try:
+        return await hermes_oauth.start_device_code_flow(label, ctx.user_id)
+    except RuntimeError as e:
+        # The Nous portal rejects device-code requests fairly often (rate
+        # limiting, WAF, client_id issues). Without this the RuntimeError
+        # escapes as a bare ASGI 500 with no body and the UI can only show an
+        # opaque failure.
+        msg = str(e)
+        log.warning(f"device-code flow failed to start: {msg}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"error": "portal_rejected_request", "detail": msg[:300]},
+        )
+
+
+@router.get("/admin/models/free")
+async def free_models(_: AuthContext = Depends(require_user)):
+    """The ':free' model ids the pool can serve right now.
+
+    Read live from the upstream catalogue (cached ~10min), so it stays correct
+    as Nous adds and retires free-tier models. Any signed-in user can read this
+    — it drives the "supported models" panel on their dashboard.
+    """
+    ids = await dispatcher.get_free_model_ids()
+    return {"models": ids, "count": len(ids)}
 
 
 @router.get("/admin/accounts/flow/{flow_id}")

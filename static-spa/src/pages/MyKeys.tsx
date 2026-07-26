@@ -10,13 +10,14 @@
  */
 import { useEffect, useState } from "react";
 import { api, ApiKeyOut } from "@/auth";
-import {
-  Card, CardContent, CardDescription, CardHeader, CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/PageHeader";
+import { TableCardSkeleton } from "@/components/Skeletons";
+import { formatNumber, formatDateTime, formatRelative } from "@/lib/format";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle, DialogTrigger,
@@ -25,16 +26,8 @@ import {
   Table, TableHeader, TableRow, TableHead, TableBody, TableCell,
 } from "@/components/ui/table";
 import {
-  KeyRound, Copy, Trash2, Plus, Loader2, AlertCircle, RefreshCw,
-} from "lucide-react";
-
-function formatDate(s: string) {
-  return new Date(s).toLocaleString();
-}
-
-function formatNumber(n: number) {
-  return new Intl.NumberFormat().format(n);
-}
+  Copy, Check, Trash2, Plus, Loader2, KeyRound, RefreshCw,
+} from "@/components/icons";
 
 export function MyKeys() {
   const [keys, setKeys] = useState<ApiKeyOut[]>([]);
@@ -45,6 +38,17 @@ export function MyKeys() {
   const [creating, setCreating] = useState(false);
   const [newlyCreated, setNewlyCreated] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  async function copyKey(key: string) {
+    try {
+      await navigator.clipboard.writeText(key);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError("Clipboard blocked — select the key and copy it manually.");
+    }
+  }
 
   async function load() {
     setLoading(true);
@@ -93,23 +97,29 @@ export function MyKeys() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">My API keys</h1>
-          <p className="text-muted-foreground mt-1">
-            Mint keys to call Nous Pool. Keys are shown in full <em>once</em> after creation — copy them then.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={load}>
-            <RefreshCw className="h-4 w-4 mr-1" /> Refresh
-          </Button>
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="h-4 w-4 mr-1" /> New key
-              </Button>
-            </DialogTrigger>
+      <PageHeader
+        title="API keys"
+        description={
+          loading
+            ? "Loading keys…"
+            : `${keys.filter((k) => k.is_active).length} active · ${
+                keys.filter((k) => !k.is_active).length
+              } revoked · full key shown once at creation`
+        }
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+              <RefreshCw
+                className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`}
+              />
+              Refresh
+            </Button>
+            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+              <DialogTrigger asChild>
+                <Button size="sm">
+                  <Plus className="mr-1.5 h-3.5 w-3.5" /> New key
+                </Button>
+              </DialogTrigger>
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>New API key</DialogTitle>
@@ -127,126 +137,176 @@ export function MyKeys() {
                   autoFocus
                 />
               </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setDialogOpen(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={handleCreate} disabled={creating || !label.trim()}>
-                  {creating ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
-                  Mint key
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </div>
-      </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleCreate} disabled={creating || !label.trim()}>
+                    {creating ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
+                    Mint key
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </>
+        }
+      />
 
       {newlyCreated && (
-        <Card className="border-amber-500/40 bg-amber-500/5">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
-              <AlertCircle className="h-5 w-5" />
-              Copy your new key — it won't be shown again
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 rounded-md bg-muted px-3 py-2 text-sm font-mono break-all">
-                {newlyCreated}
-              </code>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  navigator.clipboard.writeText(newlyCreated);
-                }}
-              >
-                <Copy className="h-4 w-4 mr-1" /> Copy
-              </Button>
-            </div>
+        <div className="rounded-lg border border-warning/40 bg-warning/[0.07] p-3">
+          <div className="mb-2 flex items-center gap-2 text-[13px] font-medium text-warning">
+            <KeyRound className="h-3.5 w-3.5" />
+            Copy this key now — it is never shown again
+          </div>
+          <div className="flex items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded border border-border bg-background px-2.5 py-1.5 font-mono text-xs">
+              {newlyCreated}
+            </code>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 shrink-0"
+              onClick={() => copyKey(newlyCreated)}
+            >
+              {copied ? (
+                <>
+                  <Check className="mr-1.5 h-3.5 w-3.5 text-success" /> Copied
+                </>
+              ) : (
+                <>
+                  <Copy className="mr-1.5 h-3.5 w-3.5" /> Copy
+                </>
+              )}
+            </Button>
             <Button
               size="sm"
               variant="ghost"
-              className="mt-2 text-muted-foreground"
+              className="h-8 shrink-0 text-muted-foreground"
               onClick={() => setNewlyCreated(null)}
             >
-              I've saved it
+              Dismiss
             </Button>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       )}
 
       {error && (
-        <div className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm">
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-[13px]">
           {error}
         </div>
       )}
 
+      {loading ? (
+        <TableCardSkeleton
+          rows={3}
+          widths={["45%", "70%", "50%", "40%", "55%", "55%", "24px"]}
+        />
+      ) : (
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <KeyRound className="h-5 w-5" />
-            {keys.length} key{keys.length === 1 ? "" : "s"}
-          </CardTitle>
-          <CardDescription>
-            Active keys authenticate requests to /v1/chat/completions.
-          </CardDescription>
-        </CardHeader>
         <CardContent className="p-0">
-          {loading ? (
-            <div className="p-8 text-center text-muted-foreground">
-              <Loader2 className="h-5 w-5 inline animate-spin mr-2" />
-              Loading…
-            </div>
-          ) : keys.length === 0 ? (
-            <div className="p-8 text-center text-muted-foreground">
-              No keys yet. Click <strong>New key</strong> to mint your first one.
+          {keys.length === 0 ? (
+            <div className="p-10 text-center">
+              <KeyRound className="mx-auto mb-3 h-7 w-7 text-muted-foreground/50" />
+              <div className="text-[13px] font-medium">No API keys yet</div>
+              <p className="mx-auto mt-1 max-w-sm text-xs text-muted-foreground">
+                Mint one to start calling the proxy from any OpenAI-compatible
+                client.
+              </p>
+              <Button
+                size="sm"
+                className="mt-4"
+                onClick={() => setDialogOpen(true)}
+              >
+                <Plus className="mr-1.5 h-3.5 w-3.5" /> New key
+              </Button>
             </div>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Label</TableHead>
-                  <TableHead>Prefix</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Requests</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead>Last used</TableHead>
-                  <TableHead className="w-12"></TableHead>
+                  <TableHead className="h-9 w-full text-[11px] uppercase tracking-[0.06em]">
+                    Label
+                  </TableHead>
+                  <TableHead className="h-9 w-[172px] text-[11px] uppercase tracking-[0.06em]">
+                    Key
+                  </TableHead>
+                  <TableHead className="h-9 w-[88px] text-[11px] uppercase tracking-[0.06em]">
+                    Status
+                  </TableHead>
+                  <TableHead className="h-9 w-[88px] text-right text-[11px] uppercase tracking-[0.06em]">
+                    Requests
+                  </TableHead>
+                  <TableHead className="h-9 w-[96px] whitespace-nowrap text-[11px] uppercase tracking-[0.06em]">
+                    Created
+                  </TableHead>
+                  <TableHead className="h-9 w-[96px] whitespace-nowrap text-[11px] uppercase tracking-[0.06em]">
+                    Last used
+                  </TableHead>
+                  <TableHead className="h-9 w-10"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {keys.map((k) => (
-                  <TableRow key={k.id}>
-                    <TableCell className="font-medium">{k.label}</TableCell>
-                    <TableCell>
+                  <TableRow
+                    key={k.id}
+                    className={`h-11 ${k.is_active ? "" : "opacity-55"}`}
+                  >
+                    <TableCell className="max-w-0 py-1.5">
+                      <span className="block truncate font-medium" title={k.label}>
+                        {k.label}
+                      </span>
+                    </TableCell>
+                    <TableCell className="py-1.5">
                       <code className="text-xs text-muted-foreground">
                         {k.key_prefix}…
                       </code>
                     </TableCell>
-                    <TableCell>
-                      <Badge variant={k.is_active ? "default" : "secondary"}>
-                        {k.is_active ? "active" : "revoked"}
-                      </Badge>
+                    <TableCell className="py-1.5">
+                      {k.is_active ? (
+                        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <span className="h-1.5 w-1.5 rounded-full bg-success" />
+                          active
+                        </span>
+                      ) : (
+                        <Badge
+                          variant="secondary"
+                          className="px-1.5 py-0 text-[10px] font-medium uppercase tracking-wide"
+                        >
+                          revoked
+                        </Badge>
+                      )}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">
+                    <TableCell className="py-1.5 text-right tabular-nums">
                       {formatNumber(k.total_requests || 0)}
                     </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      {formatDate(k.created_at)}
+                    <TableCell
+                      className="whitespace-nowrap py-1.5 text-xs text-muted-foreground"
+                      title={formatDateTime(k.created_at)}
+                    >
+                      {formatRelative(k.created_at)}
                     </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
-                      {k.last_used_at ? formatDate(k.last_used_at) : "never"}
+                    <TableCell
+                      className="whitespace-nowrap py-1.5 text-xs text-muted-foreground"
+                      title={formatDateTime(k.last_used_at)}
+                    >
+                      {formatRelative(k.last_used_at)}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="py-1.5">
                       {k.is_active ? (
                         <Button
                           variant="ghost"
                           size="icon"
+                          className="h-7 w-7"
+                          title="Revoke this key"
+                          aria-label={`Revoke ${k.label}`}
                           onClick={() => handleRevoke(k.id)}
                           disabled={revokingId === k.id}
                         >
-                          <Trash2 className="h-4 w-4 text-destructive" />
+                          {revokingId === k.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+                          )}
                         </Button>
                       ) : null}
                     </TableCell>
@@ -257,6 +317,7 @@ export function MyKeys() {
           )}
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }

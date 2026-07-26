@@ -172,6 +172,9 @@ export const api = {
     }),
   logout: () => apiFetch<{ ok: true }>("/admin/auth/logout", { method: "POST" }),
   myUsage: () => apiFetch<MyUsage>("/admin/me/usage"),
+  /** ':free' model ids, read live from the upstream Nous catalogue. */
+  freeModels: () =>
+    apiFetch<{ models: string[]; count: number }>("/admin/models/free"),
   listAccounts: () =>
     apiFetch<{ accounts: PoolAccountOut[] }>("/admin/accounts"),
   initiateAddAccount: (label: string) =>

@@ -14,7 +14,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timedelta, timezone
+
+import httpx
 
 from ..config import Settings, load_settings
 from ..db import supabase_admin
@@ -55,9 +58,8 @@ async def reserve_pool_account() -> dict | None:
 
     # Refresh if near expiry
     expires_at = datetime.fromisoformat(row["token_expires_at"].replace("Z", "+00:00"))
-    skew_threshold = (
-        datetime.now(timezone.utc)
-        + __import__("datetime").timedelta(seconds=s.pool_token_refresh_skew_seconds)
+    skew_threshold = datetime.now(timezone.utc) + timedelta(
+        seconds=s.pool_token_refresh_skew_seconds
     )
     if expires_at <= skew_threshold:
         log.info(f"refreshing near-expiry account {row['id']} ({row['account_label']})")
@@ -75,6 +77,13 @@ async def reserve_pool_account() -> dict | None:
                 row = r2.data
         elif result["status"] == "dead":
             log.warning(f"account {row['id']} marked dead during refresh")
+            # We already took a concurrency slot above; hand it back before
+            # bailing out, otherwise every dead-refresh permanently burns one
+            # of this account's max_concurrent slots.
+            await release_pool_account_slot(
+                row["id"], success=False,
+                error_message="marked dead during refresh",
+            )
             return None  # caller can retry, will pick a different account
 
     return row
@@ -100,11 +109,110 @@ async def release_pool_account_slot(account_id: str, *, success: bool = True,
         }).eq("id", account_id).execute()
 
 
+# ============================================================
+# Upstream model catalogue
+# ============================================================
+
+# The catalogue changes rarely but /v1/models is hit on every dashboard load,
+# so cache it process-wide. Tuple of (fetched_at_monotonic, models).
+_MODELS_CACHE: tuple[float, list[dict]] | None = None
+_MODELS_TTL_SECONDS = 600
+_models_lock = asyncio.Lock()
+
+
+async def get_upstream_models(force: bool = False) -> list[dict]:
+    """Fetch the upstream model catalogue, cached for _MODELS_TTL_SECONDS.
+
+    Uses any healthy pool account's access token — the catalogue is identical
+    per account. Raises RuntimeError when the pool is empty or upstream errors,
+    so callers can surface a 503 rather than an empty list that looks like
+    "no models exist".
+    """
+    global _MODELS_CACHE
+
+    now = time.monotonic()
+    if not force and _MODELS_CACHE and (now - _MODELS_CACHE[0]) < _MODELS_TTL_SECONDS:
+        return _MODELS_CACHE[1]
+
+    async with _models_lock:
+        # Another coroutine may have refreshed while we waited on the lock.
+        now = time.monotonic()
+        if not force and _MODELS_CACHE and (now - _MODELS_CACHE[0]) < _MODELS_TTL_SECONDS:
+            return _MODELS_CACHE[1]
+
+        s = _settings()
+        admin = supabase_admin()
+        # NB: there is no `inference_base_url` column on pool_accounts —
+        # elsewhere the code reads it off a select("*") row, where the missing
+        # key silently yields None. Naming it in a select() is a hard error.
+        r = (
+            admin.table("pool_accounts")
+            .select("id, access_token, token_expires_at")
+            .eq("health_status", "healthy")
+            .limit(1)
+            .execute()
+        )
+        rows = r.data or []
+        if not rows:
+            raise RuntimeError("no healthy pool account to query the catalogue with")
+
+        acct = rows[0]
+        # Refresh first if the token is at/near expiry, else upstream 401s.
+        try:
+            expires_at = datetime.fromisoformat(
+                acct["token_expires_at"].replace("Z", "+00:00")
+            )
+            if expires_at <= datetime.now(timezone.utc) + timedelta(
+                seconds=s.pool_token_refresh_skew_seconds
+            ):
+                await hermes_oauth.refresh_pool_account_token(acct["id"])
+                r2 = (
+                    admin.table("pool_accounts")
+                    .select("access_token")
+                    .eq("id", acct["id"])
+                    .maybe_single()
+                    .execute()
+                )
+                if r2.data:
+                    acct = {**acct, **r2.data}
+        except (KeyError, ValueError, AttributeError):
+            pass  # malformed timestamp — try the token as-is
+
+        base = s.inference_base_url
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                f"{base}/models",
+                headers={"Authorization": f"Bearer {acct['access_token']}"},
+            )
+        if resp.status_code >= 400:
+            raise RuntimeError(f"upstream /models returned {resp.status_code}")
+
+        body = resp.json()
+        models = body.get("data", body) if isinstance(body, dict) else body
+        if not isinstance(models, list):
+            raise RuntimeError("upstream /models returned an unexpected shape")
+
+        _MODELS_CACHE = (time.monotonic(), models)
+        log.info(f"cached {len(models)} upstream models")
+        return models
+
+
+async def get_free_model_ids() -> list[str]:
+    """Just the ':free' model ids, sorted. Empty list if upstream is down —
+    callers treat this as informational, not load-bearing."""
+    try:
+        models = await get_upstream_models()
+    except RuntimeError as e:
+        log.warning(f"could not load free models: {e}")
+        return []
+    return sorted(
+        str(m.get("id")) for m in models if str(m.get("id", "")).endswith(":free")
+    )
+
+
 async def get_pool_stats() -> dict:
     """Aggregate stats for admin dashboard."""
     admin = supabase_admin()
-    r = admin.rpc("reserve_pool_account_slot").execute()  # warm
-    # Just count via direct query
     r2 = (
         admin.table("pool_accounts")
         .select("id, health_status, total_requests, total_errors, prompt_tokens, completion_tokens, total_tokens, in_flight, max_concurrent, last_used_at, last_error_msg")
