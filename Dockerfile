@@ -46,6 +46,10 @@ ENV NOUS_POOL_HOST=0.0.0.0 \
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD curl -sf http://127.0.0.1:8000/healthz || exit 1
 
-CMD ["python", "-m", "uvicorn", "nous_pool.main:app", \
-     "--host", "0.0.0.0", "--port", "8000", \
-     "--proxy-headers"]
+# Debug: log to stdout
+RUN echo "=== Checking static dir exists ===" && \
+    ls -la /app/static 2>&1 || echo "no static dir"
+
+ENV PYTHONPATH=/app/src
+
+CMD ["python", "-u", "-c", "import os, sys; sys.path.insert(0, '/app/src'); print('=== ENV CHECK ===', flush=True); print('SUPABASE_URL=', os.environ.get('NOUS_POOL_SUPABASE_URL'), flush=True); print('STATIC DIR:', os.path.exists('/app/static'), os.listdir('/app/static') if os.path.exists('/app/static') else 'MISSING', flush=True); import uvicorn; from nous_pool.main import app; uvicorn.run(app, host='0.0.0.0', port=8000, log_level='info', proxy_headers=True)"]
