@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { Loader2, LogIn, UserPlus, KeyRound, NousMark } from "@/components/icons";
+import { Loader2, LogIn, UserPlus, NousMark } from "@/components/icons";
 import { cn } from "@/lib/utils";
 
 type Mode = "signin" | "signup";
@@ -206,16 +206,6 @@ export function LoginPage() {
               )}
             </p>
           </form>
-
-          <div className="mt-5 border-t border-border pt-4">
-            <div className="flex items-start gap-2 text-xs text-muted-foreground">
-              <KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <p>
-                The first account to sign up becomes the admin. Everyone after
-                that joins as a standard user.
-              </p>
-            </div>
-          </div>
         </CardContent>
       </Card>
     </div>
